@@ -1,4 +1,10 @@
-"""Atomic file writes and JSON helpers."""
+"""Atomic file writes and JSON helpers.
+
+Cross-platform: POSIX fsyncs the directory so a rename is durable; Windows
+cannot open a directory handle for fsync, so that step is skipped there
+(os.replace is already atomic on the same volume). Overwrites use os.replace,
+which replaces an existing destination on every platform.
+"""
 from __future__ import annotations
 
 import json
@@ -8,25 +14,42 @@ from pathlib import Path
 from typing import Any, Union
 
 
-def atomic_write(path: Union[str, Path], data: str | bytes, mode: str = "w") -> None:
-    """Write data atomically: temp file in same dir → fsync → rename."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    dir_fd = os.open(str(path.parent), os.O_RDONLY)
+def _fsync_dir(path: Path) -> None:
+    """Best-effort directory fsync (POSIX only)."""
+    if os.name == "nt":
+        return
     try:
-        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_")
-        try:
-            if isinstance(data, str):
-                os.write(fd, data.encode("utf-8"))
-            else:
-                os.write(fd, data)
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.rename(tmp_name, str(path))
-        os.fsync(dir_fd)  # ensure directory entry is durable
+        dir_fd = os.open(str(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
     finally:
         os.close(dir_fd)
+
+
+def atomic_write(path: Union[str, Path], data: str | bytes, mode: str = "w") -> None:
+    """Write data atomically: temp file in same dir → fsync → replace."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp_")
+    try:
+        if isinstance(data, str):
+            os.write(fd, data.encode("utf-8"))
+        else:
+            os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        os.replace(tmp_name, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+    _fsync_dir(path.parent)
 
 
 def atomic_write_json(path: Union[str, Path], obj: Any, indent: int = 2) -> None:

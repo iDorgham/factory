@@ -23,7 +23,7 @@
     "cost_usd": { "type": "number", "minimum": 0 },
     "tokens_used": { "type": "integer", "minimum": 0 },
     "lease": {
-      "type": "object",
+      "type": ["object", "null"],
       "properties": {
         "owner": { "type": "string" },
         "token": { "type": "integer", "minimum": 0 },

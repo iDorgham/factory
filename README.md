@@ -20,9 +20,13 @@ This directory is a complete, working skeleton of the factory architecture descr
 | Job state machine + event fold | ✅ | `kernel/src/factory_kernel/state.py` |
 | Kernel (project/job lifecycle) | ✅ | `kernel/src/factory_kernel/kernel.py` |
 | CLI (`factory` command) | ✅ | `factory` launcher + `cli.py` |
+| Stage profile loader + validation (lite/standard) | ✅ | `kernel/src/factory_kernel/profiles.py` |
+| JSON Schema validation on every kernel write | ✅ | `kernel/src/factory_kernel/schemas.py` |
+| Cross-platform atomic writes (Windows-safe) | ✅ | `kernel/src/factory_kernel/atomic.py` |
+| Test suite (81 pytest cases) | ✅ | `tests/` |
 | Role definitions (8 → 5 starter) | ✅ | `roles/` |
 | Echo adapter stub | ✅ | `adapters/echo/` |
-| `factory doctor` + `reindex` | ✅ | Implemented |
+| `factory doctor` (chain check, leases, repair) + `reindex` | ✅ | Implemented |
 | Worktree isolation (placeholder) | ✅ | `.work/<job-id>/` |
 | Derived state index | ✅ | `state/index.json` |
 
@@ -32,11 +36,14 @@ This directory is a complete, working skeleton of the factory architecture descr
 factory/
 ├── factory.json                 # global config
 ├── factory                      # CLI entry point
+├── pyproject.toml               # packaging + pytest config
+├── .gitignore
 ├── kernel/
 │   ├── schemas/                 # JSON Schemas
 │   ├── presets/                 # solo / team / enterprise
 │   ├── stages/                  # lite.yaml, standard.yaml
 │   └── src/factory_kernel/      # Python reference kernel
+├── tests/                       # pytest suite (hermetic)
 ├── projects/<name>/
 │   ├── project.json
 │   ├── checks.json
@@ -116,13 +123,32 @@ Clients (CLI / future dashboard)
 | Locking | Exclusive file + fencing token | Works without advisory flock; portable |
 | Stage definitions | YAML | Human-readable, easy to compose profiles |
 | Adapters | Folder + manifest.json | Tool-agnostic core; new tools = new folder |
+| Atomic writes | temp → fsync → `os.replace` | Cross-platform (POSIX fsyncs the dir; Windows cannot, so it is skipped) |
+| Schema validation | `jsonschema`, on every kernel write | An invalid event/snapshot never reaches disk |
 
 ## Running the tests of the architecture
 
+Install the dev dependencies and run the suite:
+
 ```bash
-./factory doctor          # integrity check + snapshot repair
+pip install -e ".[dev]"     # or: pip install pytest pyyaml jsonschema
+python -m pytest            # 81 tests: atomic, ulid, hashing, lease, state, profiles, schemas, kernel, doctor
+```
+
+The suite is hermetic: each test builds a throwaway factory tree in a temp
+directory from the real `kernel/schemas`, `kernel/presets`, and `kernel/stages`.
+
+Health checks against a real tree:
+
+```bash
+./factory doctor          # schema + event-chain verification, lease/worktree checks, snapshot repair
 ./factory project list
 ./factory job list
+./factory reindex
 ```
+
+`doctor` verifies the `prev` hash chain end to end, validates every event and
+snapshot against its schema, repairs `job.json` when it diverges from the event
+fold, and warns on expired leases, missing/orphan worktrees, and network roots.
 
 The kernel is deliberately small. Everything that can be expressed as files and events is expressed that way. Adding a new coding tool requires only an adapter that speaks the same contract.

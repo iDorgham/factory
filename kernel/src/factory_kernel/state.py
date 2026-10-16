@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from .atomic import atomic_write_json, append_jsonl, read_json, read_jsonl
 from .hashing import event_hash
+from .schemas import SchemaError, SchemaStore
 from .ulid import new_ulid
 
 
@@ -29,13 +30,36 @@ class StateError(Exception):
     pass
 
 
+def verify_chain(events: list[dict]) -> list[str]:
+    """Verify the ``prev`` hash links between consecutive events.
+
+    Returns a list of human-readable problems; an empty list means the chain is
+    intact. Detects tampering and missing/out-of-order events.
+    """
+    problems: list[str] = []
+    prev: Optional[str] = None
+    for i, ev in enumerate(events):
+        if ev.get("prev") != prev:
+            problems.append(
+                f"event {i} ({ev.get('id', '?')}): prev={ev.get('prev')!r} "
+                f"expected {prev!r}"
+            )
+        try:
+            prev = event_hash(ev)
+        except (TypeError, ValueError) as e:  # malformed event
+            problems.append(f"event {i} ({ev.get('id', '?')}): not hashable: {e}")
+            prev = None
+    return problems
+
+
 class JobState:
     """Manages the event log and derived job.json for a single job."""
 
-    def __init__(self, job_dir: Path):
+    def __init__(self, job_dir: Path, schemas_dir: Optional[Path | str] = None):
         self.job_dir = Path(job_dir)
         self.events_path = self.job_dir / "events.jsonl"
         self.job_path = self.job_dir / "job.json"
+        self.schemas = SchemaStore(schemas_dir) if schemas_dir else None
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -116,7 +140,21 @@ class JobState:
 
         return snap
 
+    def verify(self) -> list[str]:
+        """Verify the event log's schema + hash chain. Empty list means clean."""
+        events = self.load_events()
+        problems = verify_chain(events)
+        if self.schemas:
+            for i, ev in enumerate(events):
+                try:
+                    self.schemas.validate("event", ev)
+                except SchemaError as e:
+                    problems.append(f"event {i}: {e}")
+        return problems
+
     def write_snapshot(self, snap: dict) -> None:
+        if self.schemas:
+            self.schemas.validate("job", snap)
         atomic_write_json(self.job_path, snap)
 
     def append_event(
@@ -147,6 +185,8 @@ class JobState:
             "data": data,
             "prev": prev_hash,
         }
+        if self.schemas:
+            self.schemas.validate("event", event)
         append_jsonl(self.events_path, event)
 
         # Re-fold and write snapshot

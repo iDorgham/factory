@@ -9,6 +9,8 @@ from pathlib import Path
 
 from .kernel import Kernel, KernelError
 from .lease import LeaseError
+from .profiles import ProfileError
+from .schemas import SchemaError
 from .state import StateError
 
 
@@ -112,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
 
         return 0
 
-    except (KernelError, StateError, LeaseError) as e:
+    except (KernelError, StateError, LeaseError, SchemaError, ProfileError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

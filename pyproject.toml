@@ -29,4 +29,5 @@ where = ["kernel/src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["kernel/src"]
 addopts = "-q"
