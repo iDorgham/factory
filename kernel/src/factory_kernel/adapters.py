@@ -112,7 +112,9 @@ class Adapter:
         if proc.returncode != 0 and not ok:
             if error is None:
                 error = (proc.stderr or "").strip() or f"adapter exited {proc.returncode}"
-                error_class = error_class or "fatal"
+                # A negative return code means the process was killed by a signal
+                # (or, on Windows, terminated) — treat as a transient interruption.
+                error_class = error_class or ("transient" if proc.returncode < 0 else "fatal")
 
         return RunResult(ok=ok, events=events, usage=usage, error=error, error_class=error_class)
 

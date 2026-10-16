@@ -98,6 +98,7 @@ class JobState:
             "tokens_used": 0,
             "lease": None,
             "checkpoints": [],
+            "approval": None,
             "last_event_id": first["id"],
         }
 
@@ -132,6 +133,15 @@ class JobState:
                 }
             elif t == "lease.released":
                 snap["lease"] = None
+            elif t == "human.approval":
+                if d.get("decision") == "approved":
+                    snap["approval"] = {
+                        "by": ev["actor"],
+                        "sha": d.get("sha"),
+                        "ts": ev["ts"],
+                    }
+                else:
+                    snap["approval"] = None
             elif t in ("job.completed", "job.failed", "job.cancelled"):
                 snap["state"] = t.split(".")[1]
             elif t == "job.archived":

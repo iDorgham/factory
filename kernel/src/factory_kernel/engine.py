@@ -7,12 +7,15 @@ every event; the agent only writes files.
 """
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from .adapters import AdapterError, RunResult, discover_adapters, select_adapter
-from .atomic import atomic_write_json
+from .atomic import atomic_write_json, read_json
+from .checkpoint import record_checkpoint
 from .checks import fingerprint, load_checks, run_checks, summarise
 from .context import collect_stage_context
+from .hashing import sha256_hex
 from .lease import LeaseManager
 from .ulid import new_ulid
 
@@ -22,6 +25,24 @@ ADAPTER_TIMEOUT_CAP = 3600
 
 class EngineError(Exception):
     pass
+
+
+def input_hash(manifest: dict, adapter_id: Optional[str]) -> str:
+    """Content hash of an attempt's inputs (idempotency key for accepted work).
+
+    Excludes volatile fields (job_id, attempt number) so a resume with identical
+    inputs maps to the same key and can reuse an already-accepted result.
+    """
+    core = {
+        "stage": manifest.get("stage"),
+        "adapter": adapter_id,
+        "files": [
+            {"path": f.get("path"), "tokens": f.get("tokens")}
+            for f in manifest.get("files", [])
+        ],
+        "summaries": manifest.get("summaries", {}),
+    }
+    return sha256_hex(json.dumps(core, sort_keys=True, separators=(",", ":")))
 
 
 class Engine:
@@ -96,25 +117,47 @@ class Engine:
         base.mkdir(parents=True, exist_ok=True)
         checks_cfg = load_checks(project_dir)
 
+        started, last_status = self._attempts(state, sid)
+        # An attempt that started but never finished was killed mid-flight:
+        # record it as 'interrupted' (never success) before resuming.
+        for attempt in [a for a in started if a not in last_status]:
+            state.append_event(
+                "stage.attempt_finished", actor=self.k.actor, fence=fence,
+                data={"stage": sid, "attempt": attempt, "status": "interrupted",
+                      "fingerprint": None, "missing": [], "adapter_error": "interrupted"},
+                job_id=job["id"],
+            )
+            last_status[attempt] = "interrupted"
+
         state.append_event("stage.started", actor=self.k.actor, fence=fence,
                            data={"stage": sid}, job_id=job["id"])
 
-        prev_fingerprint: Optional[str] = None
-        for attempt in range(1, stage["max_rounds"] + 1):
+        # Rounds already consumed by attempts that reached a verdict. Interrupted
+        # attempts do not consume a round: they are retried at the same index.
+        used = [a for a, s in last_status.items() if s in ("passed", "failed")]
+        prev_fingerprint = self._last_fingerprint(state, sid)
+        start = (max(used) + 1) if used else 1
+
+        for attempt in range(start, stage["max_rounds"] + 1):
             attempt_dir = base / f"attempt-{attempt}"
-            outcome, fp = self._run_attempt(
+            status, fp = self._run_attempt(
                 job, job_dir, state, stage, attempt, attempt_dir, project_dir, worktree,
                 adapter_id, adapters, checks_cfg, fence, check_timeout,
             )
-            if outcome == "passed":
+            if status == "passed":
+                sha = record_checkpoint(
+                    state, attempt_dir, job_dir, worktree, sid, attempt,
+                    self.k.actor, fence,
+                )
                 state.append_event(
                     "stage.accepted", actor=self.k.actor, fence=fence,
-                    data={"stage": sid, "attempt": attempt, "next_stage": next_stage},
+                    data={"stage": sid, "attempt": attempt, "next_stage": next_stage,
+                          "sha": sha},
                     job_id=job["id"],
                 )
                 return self._apply_gate(job, state, stage, fence)
 
-            # Failed attempt: detect no-progress (spec §9.2).
+            # Failed/interrupted attempt: detect no-progress (spec §9.2).
             if prev_fingerprint is not None and fp == prev_fingerprint:
                 state.transition("stalled", actor=self.k.actor, fence=fence,
                                  reason=f"no progress in stage '{sid}'")
@@ -147,6 +190,22 @@ class Engine:
                            data={"stage": sid, "attempt": attempt}, job_id=job["id"])
 
         adapter = select_adapter(adapters, adapter_id=adapter_id, role=stage["role"])
+        key = input_hash(manifest, adapter.id)
+        atomic_write_json(attempt_dir / "input.json", {"input_hash": key})
+
+        # Idempotency: identical inputs that already produced an accepted result
+        # are reused rather than re-run.
+        previous = read_json(attempt_dir / "result.json")
+        if previous and previous.get("input_hash") == key and previous.get("status") == "passed":
+            state.append_event(
+                "stage.attempt_finished", actor=self.k.actor, fence=fence,
+                data={"stage": sid, "attempt": attempt, "status": "passed",
+                      "fingerprint": previous.get("fingerprint"), "missing": [],
+                      "reused": True},
+                job_id=job["id"],
+            )
+            return "passed", previous.get("fingerprint")
+
         run = self._invoke_adapter(
             adapter, job, stage, attempt, attempt_dir, worktree, manifest, fence
         )
@@ -168,21 +227,29 @@ class Engine:
             job_id=job["id"],
         )
 
-        passed = run.ok and not missing and summary["passed"]
+        if run.ok and not missing and summary["passed"]:
+            status = "passed"
+        elif not run.ok and (run.error_class == "transient"):
+            status = "interrupted"
+        else:
+            status = "failed"
+
         extra = run.error or ""
         if missing:
             extra = (extra + " " if extra else "") + "missing:" + ",".join(missing)
         fp = fingerprint(results, extra=extra)
 
+        atomic_write_json(attempt_dir / "result.json", {
+            "input_hash": key, "status": status, "fingerprint": fp,
+        })
         state.append_event(
             "stage.attempt_finished", actor=self.k.actor, fence=fence,
-            data={"stage": sid, "attempt": attempt,
-                  "status": "passed" if passed else "failed",
+            data={"stage": sid, "attempt": attempt, "status": status,
                   "fingerprint": fp, "missing": missing,
                   "adapter_error": run.error},
             job_id=job["id"],
         )
-        return ("passed" if passed else "failed"), fp
+        return status, fp
 
     # ------------------------------------------------------------------
     # Helpers
@@ -228,6 +295,32 @@ class Engine:
             for ev in state.load_events()
             if ev["type"] == "stage.accepted"
         }
+
+    @staticmethod
+    def _attempts(state, sid: str):
+        """(started attempt numbers, latest recorded status per attempt) for a stage."""
+        started: list[int] = []
+        last_status: dict[int, str] = {}
+        for ev in state.load_events():
+            data = ev.get("data", {})
+            if data.get("stage") != sid:
+                continue
+            if ev["type"] == "stage.attempt_started":
+                started.append(data["attempt"])
+            elif ev["type"] == "stage.attempt_finished":
+                last_status[data["attempt"]] = data.get("status")
+        return started, last_status
+
+    @staticmethod
+    def _last_fingerprint(state, sid: str) -> Optional[str]:
+        seen = None
+        for ev in state.load_events():
+            data = ev.get("data", {})
+            if (ev["type"] == "stage.attempt_finished"
+                    and data.get("stage") == sid
+                    and data.get("status") == "failed"):
+                seen = data.get("fingerprint")
+        return seen
 
     def _apply_gate(self, job, state, stage, fence) -> str:
         sid = stage["id"]

@@ -7,6 +7,7 @@ from .profiles import load_profile, validate_profile, ProfileError
 from .engine import Engine, EngineError
 from .checks import CheckResult, CheckError, run_checks, summarise
 from .adapters import Adapter, AdapterError, RunResult, discover_adapters
+from .checkpoint import result_hash, tree_hash
 
 __all__ = [
     "Kernel",
@@ -31,5 +32,7 @@ __all__ = [
     "AdapterError",
     "RunResult",
     "discover_adapters",
+    "result_hash",
+    "tree_hash",
 ]
 __version__ = "0.4.0"

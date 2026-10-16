@@ -42,6 +42,14 @@
         }
       }
     },
+    "approval": {
+      "type": ["object", "null"],
+      "properties": {
+        "by": { "type": "string" },
+        "sha": { "type": "string" },
+        "ts": { "type": "string", "format": "date-time" }
+      }
+    },
     "last_event_id": { "type": "string" }
   },
   "additionalProperties": false

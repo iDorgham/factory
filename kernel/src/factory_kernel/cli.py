@@ -79,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
     p_japprove = p_job_sub.add_parser("approve", help="Approve a job at a human gate")
     p_japprove.add_argument("job_id")
     p_japprove.add_argument("--adapter", default=None)
+    p_japprove.add_argument("--sha", default=None,
+                            help="Expected checkpoint SHA (defaults to the latest)")
 
     p_jlist = p_job_sub.add_parser("list")
     p_jlist.add_argument("--project", default=None)
@@ -121,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(json.dumps(result, indent=2))
             elif args.job_cmd == "approve":
-                result = k.job_approve(args.job_id, adapter_id=args.adapter)
+                result = k.job_approve(args.job_id, adapter_id=args.adapter, sha=args.sha)
                 print(json.dumps(result, indent=2))
             elif args.job_cmd == "list":
                 print(json.dumps(k.job_list(args.project), indent=2))

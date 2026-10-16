@@ -8,10 +8,11 @@
 ## Documentation
 
 - [docs/](docs/README.md) — index of all documentation
-- [PRD](docs/PRD.md) — product requirements, personas, features per mode
-- [Architecture](docs/ARCHITECTURE.md) — design & architecture of the implemented system
+- [PRD](docs/product/PRD.md) — product requirements, personas, features per mode
+- [Architecture](docs/architecture/ARCHITECTURE.md) — design & architecture of the implemented system
 - [Roadmap](docs/plans/ROADMAP.md) — phases P0–P5 with status and per-phase plans
-- [Specification v3.0](docs/Enterprise%20AI%20Software%20Factory%20—%20Specification%20v3.0.md) — canonical specification
+- [Specification v3.0](docs/specification/Enterprise%20AI%20Software%20Factory%20—%20Specification%20v3.0.md) — canonical specification
+- [Development](docs/development/DEVELOPMENT.md) · [Contributing](docs/development/CONTRIBUTING.md) · [Testing](docs/development/TESTING.md) · [Runbook](docs/operations/RUNBOOK.md)
 
 ## What was built
 
@@ -31,11 +32,12 @@ This directory is a complete, working skeleton of the factory architecture descr
 | Check runner + failure fingerprints | ✅ | `kernel/src/factory_kernel/checks.py` |
 | Context-manifest builder | ✅ | `kernel/src/factory_kernel/context.py` |
 | Adapter runtime (discover / select / run) | ✅ | `kernel/src/factory_kernel/adapters.py` |
+| Content-addressed checkpoints + SHA-bound approval | ✅ | `kernel/src/factory_kernel/checkpoint.py` |
 | CLI (`factory` command) | ✅ | `factory` launcher + `cli.py` |
 | Stage profile loader + validation (lite/standard) | ✅ | `kernel/src/factory_kernel/profiles.py` |
 | JSON Schema validation on every kernel write | ✅ | `kernel/src/factory_kernel/schemas.py` |
 | Cross-platform atomic writes (Windows-safe) | ✅ | `kernel/src/factory_kernel/atomic.py` |
-| Test suite (142 pytest cases) | ✅ | `tests/` |
+| Test suite (154 pytest cases) | ✅ | `tests/` |
 | Role definitions (8 → 5 starter) | ✅ | `roles/` |
 | Echo adapter stub | ✅ | `adapters/echo/` |
 | `factory doctor` (chain check, leases, repair) + `reindex` | ✅ | Implemented |
@@ -89,8 +91,9 @@ cd factory
 # Execute it through the lite stage graph (understand → plan → build → verify → approve)
 ./factory job execute <job-id>
 
-# The 'approve' gate parks the job at awaiting_human; approve to finish
-./factory job approve <job-id>
+# The 'approve' gate parks the job at awaiting_human; approve (bound to the
+# latest checkpoint SHA) to finish. A changed result invalidates the approval.
+./factory job approve <job-id> [--sha <checkpoint-sha>]
 
 # Inspect
 ./factory job list
@@ -126,7 +129,7 @@ Clients (CLI / future dashboard)
 
 ## Next phases (from the specification roadmap)
 
-- **P1 Solo slice** (in progress) — lite-profile execution through the stage-graph engine ✅, adapter runtime + echo adapter ✅, build loop with no-progress detection ✅; still to come: real git worktrees + checkpoints, a real coding-agent adapter + conformance suite, `factory serve` dashboard, SHA-bound approval and undo.
+- **P1 Solo slice** (in progress) — lite-profile execution through the stage-graph engine ✅, adapter runtime + echo adapter ✅, build loop with no-progress detection ✅, content-addressed checkpoints + SHA-bound approval ✅, `interrupted` attempt recovery + input-hash idempotency ✅; still to come: real git worktrees, a real coding-agent adapter + conformance suite, `factory serve` dashboard, merge/undo.
 - **P2 Trust layer** — budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline.
 - **P3 Team** — concurrent jobs, merge queue, RBAC, audit chain.
 - **P4 Enterprise** — brands, design-system checks, compliance export, change windows.
@@ -151,9 +154,9 @@ Install the dev dependencies and run the suite:
 
 ```bash
 pip install -e ".[dev]"     # or: pip install pytest pyyaml jsonschema flake8
-python -m pytest            # 142 tests: atomic, ulid, hashing, lease, state,
+python -m pytest            # 154 tests: atomic, ulid, hashing, lease, state,
                             #   transitions, profiles, schemas, kernel, doctor,
-                            #   engine, checks, context, adapters
+                            #   engine, checks, context, adapters, checkpoint
 python -m flake8 kernel/src tests   # lint (config in .flake8)
 ```
 

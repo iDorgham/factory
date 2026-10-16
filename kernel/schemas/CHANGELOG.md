@@ -8,6 +8,14 @@ interim record until schemas are versioned in their `$id` (planned for P1).
 
 ## `job.schema.json`
 
+### 2026-10-16 — add SHA-bound `approval`
+- **Change:** added optional `approval` (`["object", "null"]`) with `by`, `sha`,
+  `ts`; the event fold sets it from `human.approval` events.
+- **Reason:** P1 SHA-bound approval needs the approved checkpoint SHA in the job
+  snapshot so a changed result is visibly unapproved.
+- **Migration:** none required. Existing snapshots omit `approval`; the fold now
+  always emits `approval: null` for them, and `additionalProperties` still holds.
+
 ### 2026-10-16 — `lease` may be `null`
 - **Change:** `lease` is now `["object", "null"]` instead of `"object"`.
 - **Reason:** the event fold sets `lease: null` whenever no lease is held, so the

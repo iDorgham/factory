@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from .atomic import atomic_write_json, read_json
+from .checkpoint import result_hash
 from .lease import LeaseManager, LeaseError
 from .profiles import load_profile
 from .schemas import SchemaError, SchemaStore
@@ -241,19 +242,47 @@ class Kernel:
         self._reindex()
         return result
 
-    def job_approve(self, job_id: str, adapter_id: Optional[str] = None) -> dict:
-        """Approve a job parked at a human gate and resume execution."""
+    def job_approve(
+        self,
+        job_id: str,
+        adapter_id: Optional[str] = None,
+        sha: Optional[str] = None,
+    ) -> dict:
+        """Approve a job parked at a human gate and resume execution.
+
+        Approval is bound to the latest checkpoint SHA. If the produced
+        artifacts changed since that checkpoint the approval is refused — the
+        result no longer hashes to the approved SHA.
+        """
         job = self.job_status(job_id)
         if job["state"] != "awaiting_human":
             raise KernelError(f"Job is '{job['state']}'; nothing to approve")
+
         job_dir = self._find_job_dir(job_id)
+        worktree = self.work_dir / job_id
+
+        checkpoints = job.get("checkpoints") or []
+        if not checkpoints:
+            raise KernelError("No checkpoint recorded; cannot approve")
+        approved_sha = checkpoints[-1]["sha"]
+
+        current = result_hash(job_dir, worktree)
+        if current != approved_sha:
+            raise KernelError(
+                f"Job result changed since checkpoint {approved_sha[:12]}…; approval invalid"
+            )
+        if sha is not None and sha != approved_sha:
+            raise KernelError(
+                f"Provided sha {sha[:12]}… does not match checkpoint {approved_sha[:12]}…"
+            )
+
         lease = LeaseManager(job_dir, self.actor)
         fence = lease.acquire()
         try:
             state = self._job_state(job_dir)
             state.append_event(
                 "human.approval", actor=self.actor, fence=fence,
-                data={"decision": "approved"}, job_id=job_id,
+                data={"decision": "approved", "sha": approved_sha}, job_id=job_id,
             )
         finally:
             if lease.current_token() == fence:
