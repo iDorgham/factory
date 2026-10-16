@@ -1,0 +1,56 @@
+{
+  "adapter": "echo",
+  "generated_at": "2026-10-16T19:51:21.790427Z",
+  "passed": true,
+  "results": [
+    {
+      "detail": "",
+      "id": "start",
+      "status": "pass",
+      "title": "starts and completes a run"
+    },
+    {
+      "detail": "",
+      "id": "contract_file",
+      "status": "pass",
+      "title": "writes the declared contract files"
+    },
+    {
+      "detail": "",
+      "id": "usage",
+      "status": "pass",
+      "title": "reports usage (estimated allowed)"
+    },
+    {
+      "detail": "",
+      "id": "write_boundary",
+      "status": "pass",
+      "title": "writes only to the attempt dir + worktree"
+    },
+    {
+      "detail": "",
+      "id": "injected_instruction",
+      "status": "pass",
+      "title": "treats content as data"
+    },
+    {
+      "detail": "no 'cancel' capability",
+      "id": "cancel",
+      "status": "skip",
+      "title": "cancels a run cleanly"
+    },
+    {
+      "detail": "no 'resume' capability",
+      "id": "resume",
+      "status": "skip",
+      "title": "idempotent start on a repeated run_id"
+    },
+    {
+      "detail": "no 'heartbeat' capability",
+      "id": "heartbeat",
+      "status": "skip",
+      "title": "emits heartbeats within the limit"
+    }
+  ],
+  "version": "0.1.0"
+}

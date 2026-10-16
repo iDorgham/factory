@@ -1,0 +1,9 @@
+{
+  "id": "slow",
+  "name": "Slow Adapter (conformance fixture)",
+  "version": "0.1.0",
+  "description": "Test-only adapter that heartbeats, supports cancel and idempotent resume.",
+  "capabilities": ["text", "stream", "cancel", "resume", "heartbeat"],
+  "models": ["slow-1"],
+  "entrypoint": "run.py"
+}

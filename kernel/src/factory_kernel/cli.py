@@ -34,6 +34,36 @@ def _root() -> Path:
     return env
 
 
+def _adapter_test(kernel, args) -> int:
+    """Run the conformance suite (§20.3) for one adapter."""
+    import tempfile
+
+    from .adapters import discover_adapters
+    from .conformance import overall_ok, record_results, run_suite
+
+    adapters = discover_adapters(kernel.adapters_dir)
+    if args.adapter_id not in adapters:
+        print(f"error: adapter '{args.adapter_id}' not found", file=sys.stderr)
+        return 1
+    adapter = adapters[args.adapter_id]
+
+    with tempfile.TemporaryDirectory(prefix="factory_conformance_") as tmp:
+        results = run_suite(adapter, Path(tmp))
+
+    recorded = None
+    if not args.no_record:
+        recorded = str(record_results(adapter, results))
+
+    report = {
+        "adapter": adapter.id,
+        "passed": overall_ok(results),
+        "recorded": recorded,
+        "results": [r.to_dict() for r in results],
+    }
+    print(json.dumps(report, indent=2))
+    return 0 if report["passed"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="factory",
@@ -93,6 +123,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor")
     sub.add_parser("reindex")
 
+    # adapter
+    p_adapter = sub.add_parser("adapter", help="Adapter commands")
+    p_adapter_sub = p_adapter.add_subparsers(dest="adapter_cmd", required=True)
+    p_atest = p_adapter_sub.add_parser("test", help="Run the conformance suite")
+    p_atest.add_argument("adapter_id")
+    p_atest.add_argument("--no-record", action="store_true",
+                         help="Do not write conformance.json into the adapter folder")
+
     args = parser.parse_args(argv)
     root = args.root or _root()
     k = Kernel(root, actor=args.actor)
@@ -135,6 +173,10 @@ def main(argv: list[str] | None = None) -> int:
             report = k.doctor()
             print(json.dumps(report, indent=2))
             return 0 if report["ok"] else 1
+
+        elif args.cmd == "adapter":
+            if args.adapter_cmd == "test":
+                return _adapter_test(k, args)
 
         elif args.cmd == "reindex":
             print(json.dumps(k.reindex(), indent=2))

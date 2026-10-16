@@ -8,6 +8,7 @@ from .engine import Engine, EngineError
 from .checks import CheckResult, CheckError, run_checks, summarise
 from .adapters import Adapter, AdapterError, RunResult, discover_adapters
 from .checkpoint import result_hash, tree_hash
+from .conformance import CaseResult, overall_ok, run_suite
 
 __all__ = [
     "Kernel",
@@ -34,5 +35,8 @@ __all__ = [
     "discover_adapters",
     "result_hash",
     "tree_hash",
+    "CaseResult",
+    "overall_ok",
+    "run_suite",
 ]
 __version__ = "0.4.0"

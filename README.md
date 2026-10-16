@@ -32,12 +32,13 @@ This directory is a complete, working skeleton of the factory architecture descr
 | Check runner + failure fingerprints | ✅ | `kernel/src/factory_kernel/checks.py` |
 | Context-manifest builder | ✅ | `kernel/src/factory_kernel/context.py` |
 | Adapter runtime (discover / select / run) | ✅ | `kernel/src/factory_kernel/adapters.py` |
+| Adapter conformance suite (§20.3) | ✅ | `kernel/src/factory_kernel/conformance.py` |
 | Content-addressed checkpoints + SHA-bound approval | ✅ | `kernel/src/factory_kernel/checkpoint.py` |
 | CLI (`factory` command) | ✅ | `factory` launcher + `cli.py` |
 | Stage profile loader + validation (lite/standard) | ✅ | `kernel/src/factory_kernel/profiles.py` |
 | JSON Schema validation on every kernel write | ✅ | `kernel/src/factory_kernel/schemas.py` |
 | Cross-platform atomic writes (Windows-safe) | ✅ | `kernel/src/factory_kernel/atomic.py` |
-| Test suite (154 pytest cases) | ✅ | `tests/` |
+| Test suite (159 pytest cases) | ✅ | `tests/` |
 | Role definitions (8 → 5 starter) | ✅ | `roles/` |
 | Echo adapter stub | ✅ | `adapters/echo/` |
 | `factory doctor` (chain check, leases, repair) + `reindex` | ✅ | Implemented |
@@ -95,6 +96,9 @@ cd factory
 # latest checkpoint SHA) to finish. A changed result invalidates the approval.
 ./factory job approve <job-id> [--sha <checkpoint-sha>]
 
+# Run the adapter conformance suite (§20.3) and record the result
+./factory adapter test echo
+
 # Inspect
 ./factory job list
 ./factory job status <job-id>
@@ -129,7 +133,7 @@ Clients (CLI / future dashboard)
 
 ## Next phases (from the specification roadmap)
 
-- **P1 Solo slice** (in progress) — lite-profile execution through the stage-graph engine ✅, adapter runtime + echo adapter ✅, build loop with no-progress detection ✅, content-addressed checkpoints + SHA-bound approval ✅, `interrupted` attempt recovery + input-hash idempotency ✅; still to come: real git worktrees, a real coding-agent adapter + conformance suite, `factory serve` dashboard, merge/undo.
+- **P1 Solo slice** (in progress) — lite-profile execution through the stage-graph engine ✅, adapter runtime + echo adapter ✅, adapter conformance suite (§20.3) ✅, build loop with no-progress detection ✅, content-addressed checkpoints + SHA-bound approval ✅, `interrupted` attempt recovery + input-hash idempotency ✅; still to come: real git worktrees, a real coding-agent adapter, `factory serve` dashboard, merge/undo.
 - **P2 Trust layer** — budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline.
 - **P3 Team** — concurrent jobs, merge queue, RBAC, audit chain.
 - **P4 Enterprise** — brands, design-system checks, compliance export, change windows.
@@ -154,9 +158,10 @@ Install the dev dependencies and run the suite:
 
 ```bash
 pip install -e ".[dev]"     # or: pip install pytest pyyaml jsonschema flake8
-python -m pytest            # 154 tests: atomic, ulid, hashing, lease, state,
+python -m pytest            # 159 tests: atomic, ulid, hashing, lease, state,
                             #   transitions, profiles, schemas, kernel, doctor,
-                            #   engine, checks, context, adapters, checkpoint
+                            #   engine, checks, context, adapters, checkpoint,
+                            #   conformance
 python -m flake8 kernel/src tests   # lint (config in .flake8)
 ```
 
