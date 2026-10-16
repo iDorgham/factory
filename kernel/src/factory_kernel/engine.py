@@ -92,13 +92,25 @@ class Engine:
     ) -> dict:
         accepted = self._accepted_stages(state)
         stages = profile["stages"]
+        order = {s["id"]: i for i, s in enumerate(stages)}
+
+        # A "Change this…" decision re-opens the last accepted stage (and every
+        # stage after it) so the work is redone with the human's feedback.
+        reopened = self._reopened_stage(state)
+        reopen_index = order[reopened] if reopened in order else None
+        if reopen_index is not None:
+            accepted = {s for s in accepted if order.get(s, -1) < reopen_index}
+
         for index, stage in enumerate(stages):
             if stage["id"] in accepted:
                 continue
             next_stage = stages[index + 1]["id"] if index + 1 < len(stages) else None
+            # A human-requested redo restarts attempts from the reopened stage
+            # onward at attempt 1 (discarding the superseded results).
+            reset = reopen_index is not None and index >= reopen_index
             outcome = self._run_stage(
                 job, job_dir, state, stage, index, next_stage, adapters, adapter_id, fence,
-                check_timeout,
+                check_timeout, reset=reset,
             )
             if outcome != "accepted":
                 return state.fold()
@@ -106,9 +118,27 @@ class Engine:
         state.transition("completed", actor=self.k.actor, fence=fence, reason="all stages accepted")
         return state.fold()
 
+    @staticmethod
+    def _reopened_stage(state) -> Optional[str]:
+        """The stage re-opened by the latest unanswered 'changes_requested'."""
+        accepted_at: dict[str, int] = {}
+        reopened = None
+        for index, ev in enumerate(state.load_events()):
+            if ev["type"] == "stage.accepted":
+                accepted_at[ev["data"].get("stage")] = index
+            elif (ev["type"] == "human.approval"
+                    and ev["data"].get("decision") == "changes_requested"):
+                reopened = (ev["data"].get("stage"), index)
+        if not reopened:
+            return None
+        stage, index = reopened
+        if accepted_at.get(stage, -1) > index:
+            return None  # already re-accepted after the feedback
+        return stage
+
     def _run_stage(
         self, job, job_dir, state, stage, index, next_stage, adapters, adapter_id, fence,
-        check_timeout,
+        check_timeout, reset=False,
     ) -> str:
         sid = stage["id"]
         project_dir = self.k.projects_dir / job["project"]
@@ -118,6 +148,10 @@ class Engine:
         checks_cfg = load_checks(project_dir)
 
         started, last_status = self._attempts(state, sid)
+        # A human-requested redo ignores the superseded attempts of this stage
+        # so it begins again at attempt 1.
+        if reset:
+            started, last_status = {}, {}
         # An attempt that started but never finished was killed mid-flight:
         # record it as 'interrupted' (never success) before resuming.
         for attempt in [a for a in started if a not in last_status]:
@@ -142,7 +176,7 @@ class Engine:
             attempt_dir = base / f"attempt-{attempt}"
             status, fp = self._run_attempt(
                 job, job_dir, state, stage, attempt, attempt_dir, project_dir, worktree,
-                adapter_id, adapters, checks_cfg, fence, check_timeout,
+                adapter_id, adapters, checks_cfg, fence, check_timeout, reset=reset,
             )
             if status == "passed":
                 sha = record_checkpoint(
@@ -175,7 +209,7 @@ class Engine:
 
     def _run_attempt(
         self, job, job_dir, state, stage, attempt, attempt_dir, project_dir, worktree,
-        adapter_id, adapters, checks_cfg, fence, check_timeout,
+        adapter_id, adapters, checks_cfg, fence, check_timeout, reset=False,
     ):
         sid = stage["id"]
         (attempt_dir / "outputs").mkdir(parents=True, exist_ok=True)
@@ -194,9 +228,10 @@ class Engine:
         atomic_write_json(attempt_dir / "input.json", {"input_hash": key})
 
         # Idempotency: identical inputs that already produced an accepted result
-        # are reused rather than re-run.
+        # are reused rather than re-run. A human-requested redo opts out.
         previous = read_json(attempt_dir / "result.json")
-        if previous and previous.get("input_hash") == key and previous.get("status") == "passed":
+        if (not reset and previous and previous.get("input_hash") == key
+                and previous.get("status") == "passed"):
             state.append_event(
                 "stage.attempt_finished", actor=self.k.actor, fence=fence,
                 data={"stage": sid, "attempt": attempt, "status": "passed",

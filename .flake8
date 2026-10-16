@@ -2,3 +2,7 @@
 max-line-length = 100
 extend-ignore = E203, W503
 exclude = .git,__pycache__,build,dist,.work,.venv
+per-file-ignores =
+    # dashboard.py embeds a single-line HTML/CSS/JS template in a raw string;
+    # wrapped markup would be less readable than the long lines it replaces.
+    kernel/src/factory_kernel/dashboard.py: E501

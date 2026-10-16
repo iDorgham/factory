@@ -34,11 +34,12 @@ This directory is a complete, working skeleton of the factory architecture descr
 | Adapter runtime (discover / select / run) | ✅ | `kernel/src/factory_kernel/adapters.py` |
 | Adapter conformance suite (§20.3) | ✅ | `kernel/src/factory_kernel/conformance.py` |
 | Content-addressed checkpoints + SHA-bound approval | ✅ | `kernel/src/factory_kernel/checkpoint.py` |
+| Dashboard: `serve` (live SSE) + `export-dashboard` (static) | ✅ | `kernel/src/factory_kernel/dashboard.py` |
 | CLI (`factory` command) | ✅ | `factory` launcher + `cli.py` |
 | Stage profile loader + validation (lite/standard) | ✅ | `kernel/src/factory_kernel/profiles.py` |
 | JSON Schema validation on every kernel write | ✅ | `kernel/src/factory_kernel/schemas.py` |
 | Cross-platform atomic writes (Windows-safe) | ✅ | `kernel/src/factory_kernel/atomic.py` |
-| Test suite (159 pytest cases) | ✅ | `tests/` |
+| Test suite (171 pytest cases) | ✅ | `tests/` |
 | Role definitions (8 → 5 starter) | ✅ | `roles/` |
 | Echo adapter stub | ✅ | `adapters/echo/` |
 | `factory doctor` (chain check, leases, repair) + `reindex` | ✅ | Implemented |
@@ -99,12 +100,23 @@ cd factory
 # Run the adapter conformance suite (§20.3) and record the result
 ./factory adapter test echo
 
+# Open the Solo dashboard (local server; live via server-sent events)
+./factory serve
+
+# ...or write a static, read-only snapshot to share
+./factory export-dashboard --out dashboard.html
+
+# Send feedback from the approval card ("Change this…") — re-does the last stage
+./factory request-changes <job-id> "make the hero bigger"
+
 # Inspect
 ./factory job list
 ./factory job status <job-id>
 ./factory doctor
 ./factory reindex
 ```
+
+The dashboard is a client: every browser action is a kernel command, never a direct file edit. `serve` streams the view over server-sent events; `export-dashboard` writes a static, read-only snapshot.
 
 ## Core invariants enforced by the kernel
 
@@ -118,7 +130,7 @@ cd factory
 ## Architecture layers
 
 ```
-Clients (CLI / future dashboard)
+Clients (CLI / dashboard)
         │ validated commands
         ▼
      KERNEL  (deterministic, not an LLM)
@@ -133,7 +145,7 @@ Clients (CLI / future dashboard)
 
 ## Next phases (from the specification roadmap)
 
-- **P1 Solo slice** (in progress) — lite-profile execution through the stage-graph engine ✅, adapter runtime + echo adapter ✅, adapter conformance suite (§20.3) ✅, build loop with no-progress detection ✅, content-addressed checkpoints + SHA-bound approval ✅, `interrupted` attempt recovery + input-hash idempotency ✅; still to come: real git worktrees, a real coding-agent adapter, `factory serve` dashboard, merge/undo.
+- **P1 Solo slice** (in progress) — lite-profile execution through the stage-graph engine ✅, adapter runtime + echo adapter ✅, adapter conformance suite (§20.3) ✅, build loop with no-progress detection ✅, content-addressed checkpoints + SHA-bound approval ✅, `interrupted` attempt recovery + input-hash idempotency ✅, Solo dashboard (`factory serve` live + `export-dashboard` static, with Approve / Change this… from the card) ✅; still to come: real git worktrees, a real coding-agent adapter, merge/undo.
 - **P2 Trust layer** — budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline.
 - **P3 Team** — concurrent jobs, merge queue, RBAC, audit chain.
 - **P4 Enterprise** — brands, design-system checks, compliance export, change windows.
@@ -151,6 +163,7 @@ Clients (CLI / future dashboard)
 | Adapters | Folder + manifest.json | Tool-agnostic core; new tools = new folder |
 | Atomic writes | temp → fsync → `os.replace` | Cross-platform (POSIX fsyncs the dir; Windows cannot, so it is skipped) |
 | Schema validation | `jsonschema`, on every kernel write | An invalid event/snapshot never reaches disk |
+| Dashboard delivery | stdlib `http.server` + SSE; static export fallback | No runtime deps; the dashboard stays a thin client of the kernel |
 
 ## Running the tests of the architecture
 
@@ -158,10 +171,10 @@ Install the dev dependencies and run the suite:
 
 ```bash
 pip install -e ".[dev]"     # or: pip install pytest pyyaml jsonschema flake8
-python -m pytest            # 159 tests: atomic, ulid, hashing, lease, state,
+python -m pytest            # 171 tests: atomic, ulid, hashing, lease, state,
                             #   transitions, profiles, schemas, kernel, doctor,
                             #   engine, checks, context, adapters, checkpoint,
-                            #   conformance
+                            #   conformance, dashboard
 python -m flake8 kernel/src tests   # lint (config in .flake8)
 ```
 

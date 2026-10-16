@@ -141,7 +141,13 @@ class JobState:
                         "ts": ev["ts"],
                     }
                 else:
-                    snap["approval"] = None
+                    snap["approval"] = {
+                        "by": ev["actor"],
+                        "sha": "",
+                        "ts": ev["ts"],
+                        "decision": d.get("decision"),
+                        "feedback": d.get("feedback"),
+                    }
             elif t in ("job.completed", "job.failed", "job.cancelled"):
                 snap["state"] = t.split(".")[1]
             elif t == "job.archived":

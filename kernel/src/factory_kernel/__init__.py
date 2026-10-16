@@ -9,6 +9,7 @@ from .checks import CheckResult, CheckError, run_checks, summarise
 from .adapters import Adapter, AdapterError, RunResult, discover_adapters
 from .checkpoint import result_hash, tree_hash
 from .conformance import CaseResult, overall_ok, run_suite
+from .dashboard import build_view, export_dashboard, render_html
 
 __all__ = [
     "Kernel",
@@ -38,5 +39,8 @@ __all__ = [
     "CaseResult",
     "overall_ok",
     "run_suite",
+    "build_view",
+    "export_dashboard",
+    "render_html",
 ]
 __version__ = "0.4.0"

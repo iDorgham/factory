@@ -8,6 +8,17 @@ interim record until schemas are versioned in their `$id` (planned for P1).
 
 ## `job.schema.json`
 
+### 2026-10-16 — document rework fields on `approval`
+- **Change:** added `decision` and `feedback` to the `approval` object's
+  `properties`. Both were already accepted (the object has no
+  `additionalProperties: false`), so this only makes the shape explicit.
+- **Reason:** the fold now sets `approval` from *every* `human.approval` event —
+  `decision` is `"approved"` or `"changes_requested"`, and `feedback` carries the
+  human's note on a rework request. The Solo dashboard's "Change this…" action
+  writes both.
+- **Migration:** none required. Approved snapshots keep `by`/`sha`/`ts`; only
+  rework snapshots add the two new keys.
+
 ### 2026-10-16 — add SHA-bound `approval`
 - **Change:** added optional `approval` (`["object", "null"]`) with `by`, `sha`,
   `ts`; the event fold sets it from `human.approval` events.

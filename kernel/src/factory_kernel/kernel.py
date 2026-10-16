@@ -289,6 +289,37 @@ class Kernel:
                 lease.release(fence)
         return self.job_execute(job_id, adapter_id=adapter_id)
 
+    def job_request_changes(self, job_id: str, feedback: str, stage: Optional[str] = None) -> dict:
+        """Send feedback from the approval card: re-open the last stage and redo it."""
+        job = self.job_status(job_id)
+        if job["state"] not in ("awaiting_human", "blocked"):
+            raise KernelError(f"Job is '{job['state']}'; nothing to change")
+        job_dir = self._find_job_dir(job_id)
+        target = stage or self._last_accepted_stage(job_dir)
+        if target is None:
+            raise KernelError("No accepted stage to re-open")
+
+        lease = LeaseManager(job_dir, self.actor)
+        fence = lease.acquire()
+        try:
+            state = self._job_state(job_dir)
+            state.append_event(
+                "human.approval", actor=self.actor, fence=fence,
+                data={"decision": "changes_requested", "feedback": feedback, "stage": target},
+                job_id=job_id,
+            )
+        finally:
+            if lease.current_token() == fence:
+                lease.release(fence)
+        return self.job_execute(job_id)
+
+    def _last_accepted_stage(self, job_dir: Path) -> Optional[str]:
+        stage = None
+        for ev in self._job_state(job_dir).load_events():
+            if ev["type"] == "stage.accepted":
+                stage = ev["data"].get("stage")
+        return stage
+
     # ------------------------------------------------------------------
     # Doctor & reindex
     # ------------------------------------------------------------------

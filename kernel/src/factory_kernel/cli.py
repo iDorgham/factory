@@ -123,6 +123,19 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor")
     sub.add_parser("reindex")
 
+    p_serve = sub.add_parser("serve", help="Run the local dashboard server")
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8787)
+    p_serve.add_argument("--no-open", action="store_true", help="Do not open a browser")
+
+    p_export = sub.add_parser("export-dashboard", help="Write a static dashboard snapshot")
+    p_export.add_argument("--out", default=None)
+    p_export.add_argument("--project", default=None)
+
+    p_rc = sub.add_parser("request-changes", help="Send feedback from the approval card")
+    p_rc.add_argument("job_id")
+    p_rc.add_argument("feedback")
+
     # adapter
     p_adapter = sub.add_parser("adapter", help="Adapter commands")
     p_adapter_sub = p_adapter.add_subparsers(dest="adapter_cmd", required=True)
@@ -180,6 +193,21 @@ def main(argv: list[str] | None = None) -> int:
 
         elif args.cmd == "reindex":
             print(json.dumps(k.reindex(), indent=2))
+
+        elif args.cmd == "serve":
+            from .dashboard import serve
+
+            serve(k, host=args.host, port=args.port, open_browser=not args.no_open)
+
+        elif args.cmd == "export-dashboard":
+            from .dashboard import export_dashboard
+
+            out = export_dashboard(k, out=args.out, project=args.project)
+            print(str(out))
+
+        elif args.cmd == "request-changes":
+            result = k.job_request_changes(args.job_id, args.feedback)
+            print(json.dumps(result, indent=2))
 
         return 0
 
