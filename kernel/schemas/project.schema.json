@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory.local/schemas/project.schema.json",
+  "title": "Project",
+  "type": "object",
+  "required": ["name", "mode", "domain", "stage_profile", "created_at"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+    "mode": { "type": "string", "enum": ["solo", "team", "enterprise"] },
+    "domain": { "type": "string", "enum": ["web", "mobile", "desktop", "game", "generic"] },
+    "stage_profile": { "type": "string", "enum": ["lite", "standard"] },
+    "brand": { "type": ["string", "null"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "base_commit": { "type": ["string", "null"] },
+    "policy_overrides": { "type": "object" },
+    "status": { "type": "string", "enum": ["active", "paused", "archived"], "default": "active" }
+  },
+  "additionalProperties": false
+}

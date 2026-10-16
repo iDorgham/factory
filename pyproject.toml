@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "factory-kernel"
+version = "0.3.0"
+description = "Enterprise AI Software Factory — deterministic kernel (P0 core)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0",
+    "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+factory = "factory_kernel.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "kernel/src" }
+
+[tool.setuptools.packages.find]
+where = ["kernel/src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

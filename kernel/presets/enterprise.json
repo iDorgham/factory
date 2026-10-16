@@ -1,0 +1,27 @@
+{
+  "mode": "enterprise",
+  "stage_profile": "standard",
+  "max_concurrent_jobs": 16,
+  "gates": {
+    "visual_approval": "if_ui_changed",
+    "plan_approval": "if_risk_above:low",
+    "skill_promotion": "always_human",
+    "architecture_change": "always",
+    "auto_merge": {
+      "enabled": false,
+      "requires": ["required_checks_pass", "no_blocking_findings", "risk_at_most:low", "visual_approved_if_ui", "required_approvers"]
+    }
+  },
+  "budgets": {
+    "job_hard_usd": 100.00,
+    "job_soft_usd": 40.00,
+    "attempt_tokens": 1200000,
+    "project_month_usd": 2000.00,
+    "brand_month_usd": 10000.00
+  },
+  "dashboard_panels": ["jobs", "queues", "approvals", "cost", "prs", "policy", "audit", "brands"],
+  "rbac": true,
+  "audit_chain": true,
+  "compliance": true,
+  "change_windows": true
+}

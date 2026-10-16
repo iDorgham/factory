@@ -1,0 +1,14 @@
+{
+  "id": "echo",
+  "name": "Echo Adapter (test)",
+  "version": "0.1.0",
+  "description": "Minimal adapter that echoes the prompt; used for kernel conformance tests.",
+  "capabilities": ["text"],
+  "models": ["echo-1"],
+  "entrypoint": "run.py",
+  "conformance": {
+    "reports_usage": true,
+    "respects_token_budget": true,
+    "writes_only_attempt_dir": true
+  }
+}

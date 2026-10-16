@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Derived, rebuildable state (see spec §5.1 / §4.2)
+state/index.json
+
+# Per-job worktrees (outside version control, see spec §5.1)
+.work/

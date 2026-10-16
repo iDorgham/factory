@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory.local/schemas/job.schema.json",
+  "title": "Job Snapshot",
+  "type": "object",
+  "required": ["id", "project", "state", "created_at", "updated_at", "brief", "profile", "mode"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" },
+    "project": { "type": "string" },
+    "state": {
+      "type": "string",
+      "enum": ["pending", "running", "awaiting_human", "blocked", "stalled", "paused", "failed", "completed", "cancelled", "superseded", "archived"]
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "brief": { "type": "string" },
+    "profile": { "type": "string", "enum": ["lite", "standard"] },
+    "mode": { "type": "string", "enum": ["solo", "team", "enterprise"] },
+    "epic": { "type": ["string", "null"] },
+    "current_stage": { "type": ["string", "null"] },
+    "current_attempt": { "type": ["integer", "null"] },
+    "risk_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "cost_usd": { "type": "number", "minimum": 0 },
+    "tokens_used": { "type": "integer", "minimum": 0 },
+    "lease": {
+      "type": "object",
+      "properties": {
+        "owner": { "type": "string" },
+        "token": { "type": "integer", "minimum": 0 },
+        "expires": { "type": "string", "format": "date-time" }
+      }
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "stage": { "type": "string" },
+          "attempt": { "type": "integer" },
+          "sha": { "type": "string" },
+          "ts": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "last_event_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

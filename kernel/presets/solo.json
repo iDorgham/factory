@@ -1,0 +1,23 @@
+{
+  "mode": "solo",
+  "stage_profile": "lite",
+  "max_concurrent_jobs": 1,
+  "gates": {
+    "visual_approval": "if_ui_changed",
+    "plan_approval": "never",
+    "skill_promotion": "always_human",
+    "architecture_change": "if_risk_above:medium",
+    "auto_merge": {
+      "enabled": false,
+      "requires": ["required_checks_pass", "no_blocking_findings", "risk_at_most:low"]
+    }
+  },
+  "budgets": {
+    "job_hard_usd": 15.00,
+    "job_soft_usd": 5.00,
+    "attempt_tokens": 500000
+  },
+  "dashboard_panels": ["jobs", "approvals", "cost"],
+  "rbac": false,
+  "audit_chain": false
+}

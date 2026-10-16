@@ -1,0 +1,26 @@
+{
+  "a11y": {
+    "cmd": "echo 'a11y placeholder'",
+    "required": false
+  },
+  "build": {
+    "cmd": "echo 'build placeholder'",
+    "required": true
+  },
+  "lint": {
+    "cmd": "echo 'lint placeholder'",
+    "required": true
+  },
+  "typecheck": {
+    "cmd": "echo 'typecheck placeholder'",
+    "required": false
+  },
+  "unit": {
+    "cmd": "echo 'unit tests placeholder'",
+    "required": true
+  },
+  "visual": {
+    "cmd": "echo 'visual placeholder'",
+    "required": false
+  }
+}

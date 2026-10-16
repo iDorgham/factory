@@ -1,0 +1,25 @@
+{
+  "version": "3.0",
+  "default_mode": "solo",
+  "price_table": {
+    "default": {
+      "input_per_1m": 3.00,
+      "output_per_1m": 15.00,
+      "cached_per_1m": 0.30
+    }
+  },
+  "sandbox": {
+    "type": "process",
+    "network_allowlist": ["github.com", "pypi.org", "registry.npmjs.org"],
+    "resource_limits": {
+      "cpu_seconds": 3600,
+      "memory_mb": 4096,
+      "disk_mb": 10240
+    }
+  },
+  "defaults": {
+    "max_concurrent_jobs": 1,
+    "hard_budget_usd": 25.00,
+    "soft_budget_usd": 10.00
+  }
+}

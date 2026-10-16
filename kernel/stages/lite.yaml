@@ -1,0 +1,64 @@
+# lite profile — Solo default (5 steps)
+profile: lite
+description: Minimal verified path for beginners and indie builders
+
+stages:
+  - id: understand
+    role: analyst
+    requires: []
+    produces: [brief.md, assumptions.md, questions.md]
+    checks: []
+    guards: []
+    effects: local
+    max_rounds: 2
+    budget: { tokens: 80000, usd: 0.50, minutes: 10 }
+    gate: none
+    on_fail: escalate
+
+  - id: plan
+    role: planner
+    requires: [brief.md]
+    produces: [plan.md]
+    checks: []
+    guards: []
+    effects: local
+    max_rounds: 2
+    budget: { tokens: 120000, usd: 1.00, minutes: 15 }
+    gate: none
+    on_fail: escalate
+
+  - id: build
+    role: builder
+    requires: [plan.md]
+    produces: [build.md, git:commits]
+    checks: [lint, typecheck, unit, build]
+    guards: [no_test_deletion, no_lockfile_surprise, no_secret_in_diff]
+    effects: local
+    max_rounds: 6
+    budget: { tokens: 600000, usd: 5.00, minutes: 60 }
+    gate: none
+    on_fail: loop
+
+  - id: verify
+    role: verifier
+    requires: [build.md]
+    produces: [verify.md]
+    checks: [lint, typecheck, unit, build, a11y, visual]
+    guards: []
+    effects: local
+    max_rounds: 2
+    budget: { tokens: 100000, usd: 1.00, minutes: 20 }
+    gate: risk_scored
+    on_fail: escalate
+
+  - id: approve
+    role: integrator
+    requires: [verify.md]
+    produces: [decision.md]
+    checks: []
+    guards: []
+    effects: local
+    max_rounds: 1
+    budget: { tokens: 20000, usd: 0.20, minutes: 5 }
+    gate: required
+    on_fail: fail

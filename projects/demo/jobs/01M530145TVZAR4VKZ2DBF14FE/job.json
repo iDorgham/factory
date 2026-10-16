@@ -1,0 +1,19 @@
+{
+  "brief": "Build a simple landing page with a hero and contact form",
+  "checkpoints": [],
+  "cost_usd": 0.0,
+  "created_at": "2026-10-16T18:36:45.807419Z",
+  "current_attempt": null,
+  "current_stage": null,
+  "epic": null,
+  "id": "01M530145TVZAR4VKZ2DBF14FE",
+  "last_event_id": "01M53015BFFVBWQG5Q310N0M79",
+  "lease": null,
+  "mode": "solo",
+  "profile": "lite",
+  "project": "demo",
+  "risk_score": 0.0,
+  "state": "pending",
+  "tokens_used": 0,
+  "updated_at": "2026-10-16T18:36:45.807419Z"
+}

@@ -1,0 +1,12 @@
+{
+  "base_commit": null,
+  "brand": null,
+  "created_at": "2026-10-16T18:36:37.338264Z",
+  "domain": "web",
+  "mode": "solo",
+  "name": "demo",
+  "policy_overrides": {},
+  "stage_profile": "lite",
+  "status": "active",
+  "updated_at": "2026-10-16T18:36:37.338264Z"
+}

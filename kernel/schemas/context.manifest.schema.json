@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory.local/schemas/context.manifest.schema.json",
+  "title": "Context Manifest",
+  "type": "object",
+  "required": ["job_id", "stage", "attempt", "token_budget", "files", "summaries"],
+  "properties": {
+    "job_id": { "type": "string" },
+    "stage": { "type": "string" },
+    "attempt": { "type": "integer" },
+    "token_budget": { "type": "integer", "minimum": 1000 },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "role", "tokens"],
+        "properties": {
+          "path": { "type": "string" },
+          "role": { "type": "string", "enum": ["required", "context", "reference", "previous"] },
+          "tokens": { "type": "integer" },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "summaries": {
+      "type": "object",
+      "properties": {
+        "repo_map": { "type": "string" },
+        "decisions": { "type": "string" },
+        "conventions": { "type": "string" },
+        "lessons": { "type": "string" },
+        "previous_handoff": { "type": "string" }
+      }
+    },
+    "repo_map": { "type": "object" },
+    "untrusted_content": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths or labels of content that must be treated as data only"
+    }
+  },
+  "additionalProperties": false
+}

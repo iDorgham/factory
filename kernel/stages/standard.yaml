@@ -1,0 +1,140 @@
+# standard profile — Team / Enterprise
+profile: standard
+description: Full stage graph with adaptive definition and review lenses
+
+stages:
+  - id: understand
+    role: analyst
+    requires: []
+    produces: [brief.md, assumptions.md, questions.md]
+    checks: []
+    guards: []
+    effects: local
+    max_rounds: 2
+    budget: { tokens: 100000, usd: 0.80, minutes: 15 }
+    gate: none
+    on_fail: escalate
+
+  - id: define
+    role: architect
+    requires: [brief.md]
+    produces: [spec.md, architecture.md]
+    checks: []
+    guards: []
+    effects: local
+    max_rounds: 2
+    budget: { tokens: 200000, usd: 2.00, minutes: 25 }
+    gate: if_risk_above:medium
+    on_fail: escalate
+    adaptive: true   # only run if size/risk warrants
+
+  - id: plan
+    role: planner
+    requires: [brief.md]
+    produces: [plan.md]
+    checks: []
+    guards: []
+    effects: local
+    max_rounds: 3
+    budget: { tokens: 150000, usd: 1.50, minutes: 20 }
+    gate: if_risk_above:medium
+    on_fail: escalate
+
+  - id: design
+    role: designer
+    requires: [plan.md]
+    produces: [design.md, tokens.json]
+    checks: []
+    guards: []
+    effects: local
+    max_rounds: 2
+    budget: { tokens: 120000, usd: 1.20, minutes: 20 }
+    gate: none
+    on_fail: escalate
+    domain: [web, mobile, desktop]   # only for UI domains
+
+  - id: scaffold
+    role: builder
+    requires: [plan.md]
+    produces: [scaffold.md]
+    checks: [lint, typecheck]
+    guards: []
+    effects: local
+    max_rounds: 2
+    budget: { tokens: 150000, usd: 1.50, minutes: 20 }
+    gate: none
+    on_fail: loop
+    adaptive: true   # new projects only
+
+  - id: build
+    role: builder
+    requires: [plan.md]
+    produces: [build.md, git:commits]
+    checks: [lint, typecheck, unit, build]
+    guards: [no_test_deletion, no_lockfile_surprise, no_secret_in_diff]
+    effects: local
+    max_rounds: 8
+    budget: { tokens: 800000, usd: 8.00, minutes: 90 }
+    gate: none
+    on_fail: loop
+
+  - id: verify
+    role: verifier
+    requires: [build.md]
+    produces: [verify.md]
+    checks: [lint, typecheck, unit, build, a11y, visual]
+    guards: []
+    effects: local
+    max_rounds: 3
+    budget: { tokens: 150000, usd: 1.50, minutes: 30 }
+    gate: risk_scored
+    on_fail: escalate
+
+  - id: review
+    role: reviewer
+    requires: [verify.md]
+    produces: [reviews/]
+    checks: []
+    guards: []
+    effects: local
+    max_rounds: 1
+    budget: { tokens: 200000, usd: 2.00, minutes: 25 }
+    gate: none
+    on_fail: escalate
+    lenses: [security, performance, accessibility, maintainability]
+
+  - id: polish
+    role: builder
+    requires: [reviews/]
+    produces: [polish.md]
+    checks: [lint, typecheck, unit, build]
+    guards: []
+    effects: local
+    max_rounds: 3
+    budget: { tokens: 200000, usd: 2.00, minutes: 30 }
+    gate: none
+    on_fail: loop
+
+  - id: approve
+    role: integrator
+    requires: [polish.md]
+    produces: [decision.md]
+    checks: []
+    guards: []
+    effects: local
+    max_rounds: 1
+    budget: { tokens: 30000, usd: 0.30, minutes: 10 }
+    gate: required
+    on_fail: fail
+
+  - id: merge
+    role: integrator
+    requires: [decision.md]
+    produces: [merge.md]
+    checks: [required_checks]
+    guards: []
+    effects: local
+    max_rounds: 1
+    budget: { tokens: 20000, usd: 0.20, minutes: 10 }
+    gate: required
+    on_fail: fail
