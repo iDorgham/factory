@@ -5,17 +5,14 @@ checks, budgets, and audit. Agents never mutate state.
 """
 from __future__ import annotations
 
-import json
 import os
-import shutil
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from .atomic import atomic_write_json, read_json
 from .lease import LeaseManager, LeaseError
-from .profiles import ProfileError, load_profile
+from .profiles import load_profile
 from .schemas import SchemaError, SchemaStore
 from .state import JobState, StateError, verify_chain
 from .ulid import new_ulid
@@ -100,7 +97,9 @@ class Kernel:
         (proj_dir / "memory" / "conventions.md").write_text(
             "# Code & Design Conventions\n\n", encoding="utf-8"
         )
-        atomic_write_json(proj_dir / "memory" / "repo-map.json", {"symbols": {}, "entry_points": []})
+        atomic_write_json(
+            proj_dir / "memory" / "repo-map.json", {"symbols": {}, "entry_points": []}
+        )
         (proj_dir / "memory" / "lessons.jsonl").touch()
 
         # Default checks
@@ -188,7 +187,10 @@ class Kernel:
 
     def job_list(self, project: Optional[str] = None) -> list[dict]:
         jobs = []
-        projects = [project] if project else [p.name for p in self.projects_dir.iterdir() if p.is_dir()]
+        if project:
+            projects = [project]
+        else:
+            projects = [p.name for p in self.projects_dir.iterdir() if p.is_dir()]
         for pname in projects:
             jobs_dir = self.projects_dir / pname / "jobs"
             if not jobs_dir.exists():
@@ -318,7 +320,11 @@ class Kernel:
                     )
                 else:
                     report["active_leases"].append(
-                        {"job": folded["id"], "owner": lease.get("owner"), "expires": lease["expires"]}
+                        {
+                            "job": folded["id"],
+                            "owner": lease.get("owner"),
+                            "expires": lease["expires"],
+                        }
                     )
 
             if folded["state"] not in TERMINAL_STATES:

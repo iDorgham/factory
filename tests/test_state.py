@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from factory_kernel.atomic import atomic_write_json, read_json, read_jsonl
+from factory_kernel.atomic import read_json, read_jsonl
 from factory_kernel.schemas import SchemaError
 from factory_kernel.state import JobState, StateError, verify_chain
 from factory_kernel.ulid import new_ulid

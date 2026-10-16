@@ -23,7 +23,7 @@ This directory is a complete, working skeleton of the factory architecture descr
 | Stage profile loader + validation (lite/standard) | ✅ | `kernel/src/factory_kernel/profiles.py` |
 | JSON Schema validation on every kernel write | ✅ | `kernel/src/factory_kernel/schemas.py` |
 | Cross-platform atomic writes (Windows-safe) | ✅ | `kernel/src/factory_kernel/atomic.py` |
-| Test suite (81 pytest cases) | ✅ | `tests/` |
+| Test suite (109 pytest cases) | ✅ | `tests/` |
 | Role definitions (8 → 5 starter) | ✅ | `roles/` |
 | Echo adapter stub | ✅ | `adapters/echo/` |
 | `factory doctor` (chain check, leases, repair) + `reindex` | ✅ | Implemented |
@@ -121,6 +121,7 @@ Clients (CLI / future dashboard)
 | ID generation | ULID | Time-sortable, 26-char, no external dep |
 | Event chaining | prev = hash of previous event | Detects tampering / missing events |
 | Locking | Exclusive file + fencing token | Works without advisory flock; portable |
+| Lock mutual exclusion | Exclusive-create guard file (`O_CREAT\|O_EXCL`) | Portable create-exclusive semantics (spec §5.2); a stale guard is stolen |
 | Stage definitions | YAML | Human-readable, easy to compose profiles |
 | Adapters | Folder + manifest.json | Tool-agnostic core; new tools = new folder |
 | Atomic writes | temp → fsync → `os.replace` | Cross-platform (POSIX fsyncs the dir; Windows cannot, so it is skipped) |
@@ -131,8 +132,10 @@ Clients (CLI / future dashboard)
 Install the dev dependencies and run the suite:
 
 ```bash
-pip install -e ".[dev]"     # or: pip install pytest pyyaml jsonschema
-python -m pytest            # 81 tests: atomic, ulid, hashing, lease, state, profiles, schemas, kernel, doctor
+pip install -e ".[dev]"     # or: pip install pytest pyyaml jsonschema flake8
+python -m pytest            # 109 tests: atomic, ulid, hashing, lease, state,
+                            #   transitions, profiles, schemas, kernel, doctor
+python -m flake8 kernel/src tests   # lint (config in .flake8)
 ```
 
 The suite is hermetic: each test builds a throwaway factory tree in a temp

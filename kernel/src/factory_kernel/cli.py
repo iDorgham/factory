@@ -47,7 +47,8 @@ def main(argv: list[str] | None = None) -> int:
     p_create = p_proj_sub.add_parser("create")
     p_create.add_argument("name")
     p_create.add_argument("--mode", default="solo", choices=["solo", "team", "enterprise"])
-    p_create.add_argument("--domain", default="web", choices=["web", "mobile", "desktop", "game", "generic"])
+    p_create.add_argument("--domain", default="web",
+                          choices=["web", "mobile", "desktop", "game", "generic"])
     p_create.add_argument("--brand", default=None)
 
     p_proj_sub.add_parser("list")
@@ -85,7 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "project":
             if args.proj_cmd == "create":
-                result = k.project_create(args.name, mode=args.mode, domain=args.domain, brand=args.brand)
+                result = k.project_create(
+                    args.name, mode=args.mode, domain=args.domain, brand=args.brand
+                )
                 print(json.dumps(result, indent=2))
             elif args.proj_cmd == "list":
                 print(json.dumps(k.project_list(), indent=2))
@@ -94,7 +97,9 @@ def main(argv: list[str] | None = None) -> int:
 
         elif args.cmd == "job":
             if args.job_cmd == "run":
-                result = k.job_run(args.project, args.description, epic=args.epic, profile=args.profile)
+                result = k.job_run(
+                    args.project, args.description, epic=args.epic, profile=args.profile
+                )
                 print(json.dumps(result, indent=2))
             elif args.job_cmd == "status":
                 print(json.dumps(k.job_status(args.job_id), indent=2))

@@ -1,6 +1,8 @@
 """Lease + fencing token tests (spec §5.2)."""
 from __future__ import annotations
 
+import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -76,3 +78,35 @@ def test_fencing_token_is_monotonic(tmp_path):
     m = _make(tmp_path, "alice")
     tokens = [m.acquire() for _ in range(5)]
     assert tokens == [1, 2, 3, 4, 5]
+
+
+# -- exclusive-create guard (spec §5.2) -------------------------------------
+
+
+def test_guard_removed_after_acquire(tmp_path):
+    m = _make(tmp_path, "alice")
+    m.acquire()
+    assert not (tmp_path / ".lease.guard").exists()
+
+
+def test_guard_removed_after_release(tmp_path):
+    m = _make(tmp_path, "alice")
+    token = m.acquire()
+    m.release(token)
+    assert not (tmp_path / ".lease.guard").exists()
+
+
+def test_stale_guard_is_stolen(tmp_path):
+    m = _make(tmp_path, "alice")
+    guard = tmp_path / ".lease.guard"
+    guard.write_text("left by a crashed process", encoding="utf-8")
+    old = time.time() - 3600
+    os.utime(guard, (old, old))
+    assert m.acquire() == 1
+
+
+def test_fresh_guard_times_out(tmp_path):
+    m = _make(tmp_path, "alice")
+    (tmp_path / ".lease.guard").write_text("held", encoding="utf-8")
+    with pytest.raises(LeaseError):
+        m._guard(timeout=0.05)

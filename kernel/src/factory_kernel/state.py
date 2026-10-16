@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from .atomic import atomic_write_json, append_jsonl, read_json, read_jsonl
+from .atomic import atomic_write_json, append_jsonl, read_jsonl
 from .hashing import event_hash
 from .schemas import SchemaError, SchemaStore
 from .ulid import new_ulid
@@ -13,7 +13,9 @@ from .ulid import new_ulid
 
 VALID_TRANSITIONS = {
     "pending": {"running", "cancelled"},
-    "running": {"awaiting_human", "blocked", "stalled", "paused", "failed", "completed", "cancelled"},
+    "running": {
+        "awaiting_human", "blocked", "stalled", "paused", "failed", "completed", "cancelled",
+    },
     "awaiting_human": {"running", "cancelled", "blocked"},
     "blocked": {"running", "cancelled"},
     "stalled": {"running", "awaiting_human", "failed", "cancelled"},

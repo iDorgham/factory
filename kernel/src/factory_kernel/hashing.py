@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
 
 
 def sha256_hex(data: str | bytes) -> str:
