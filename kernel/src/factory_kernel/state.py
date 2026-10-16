@@ -99,6 +99,7 @@ class JobState:
             "lease": None,
             "checkpoints": [],
             "approval": None,
+            "merge": None,
             "last_event_id": first["id"],
         }
 
@@ -123,6 +124,7 @@ class JobState:
                     "stage": d["stage"],
                     "attempt": d["attempt"],
                     "sha": d["sha"],
+                    "commit": d.get("commit"),
                     "ts": ev["ts"],
                 })
             elif t == "lease.acquired" or t == "lease.renewed":
@@ -152,6 +154,8 @@ class JobState:
                 snap["state"] = t.split(".")[1]
             elif t == "job.archived":
                 snap["state"] = "archived"
+            elif t in ("merge.completed", "merge.conflict", "merge.undone"):
+                snap["merge"] = {"event": t, **d}
             elif t == "budget.soft_exceeded" or t == "budget.hard_exceeded":
                 pass  # informational
             # cost aggregation could be added here from usage events

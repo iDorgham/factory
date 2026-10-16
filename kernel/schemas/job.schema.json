@@ -38,6 +38,7 @@
           "stage": { "type": "string" },
           "attempt": { "type": "integer" },
           "sha": { "type": "string" },
+          "commit": { "type": ["string", "null"] },
           "ts": { "type": "string", "format": "date-time" }
         }
       }
@@ -50,6 +51,19 @@
         "ts": { "type": "string", "format": "date-time" },
         "decision": { "type": "string" },
         "feedback": { "type": ["string", "null"] }
+      }
+    },
+    "merge": {
+      "type": ["object", "null"],
+      "properties": {
+        "event": { "type": "string" },
+        "branch": { "type": "string" },
+        "base": { "type": ["string", "null"] },
+        "merge_commit": { "type": ["string", "null"] },
+        "conflicts": { "type": "array", "items": { "type": "string" } },
+        "mode": { "type": "string" },
+        "sha": { "type": "string" },
+        "ts": { "type": "string" }
       }
     },
     "last_event_id": { "type": "string" }

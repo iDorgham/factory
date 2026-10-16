@@ -60,6 +60,7 @@ class Engine:
         job_id: str,
         adapter_id: Optional[str] = None,
         check_timeout: int = 600,
+        on_complete=None,
     ) -> dict:
         job = self.k.job_status(job_id)
         job_dir = self.k._find_job_dir(job_id)
@@ -76,8 +77,12 @@ class Engine:
             adapters = discover_adapters(self.k.adapters_dir)
             if not adapters:
                 raise EngineError("No adapters installed under adapters/")
+            # Resume restores the worktree to the last accepted checkpoint SHA
+            # rather than rerunning on a possibly dirty tree (spec §239).
+            self._restore_worktree(state, self.k.work_dir / job_id)
             return self._run_profile(
-                job, job_dir, state, profile, adapters, adapter_id, fence, check_timeout
+                job, job_dir, state, profile, adapters, adapter_id, fence, check_timeout,
+                on_complete,
             )
         finally:
             if lease.current_token() == fence:
@@ -88,7 +93,8 @@ class Engine:
     # ------------------------------------------------------------------
 
     def _run_profile(
-        self, job, job_dir, state, profile, adapters, adapter_id, fence, check_timeout
+        self, job, job_dir, state, profile, adapters, adapter_id, fence, check_timeout,
+        on_complete=None,
     ) -> dict:
         accepted = self._accepted_stages(state)
         stages = profile["stages"]
@@ -114,6 +120,13 @@ class Engine:
             )
             if outcome != "accepted":
                 return state.fold()
+
+        # All required stages are accepted. The merge hook (if any) integrates the
+        # job branch before the job is marked completed; a conflict blocks it.
+        if on_complete is not None and on_complete(job, state, fence) == "conflict":
+            state.transition("blocked", actor=self.k.actor, fence=fence,
+                             reason="merge conflict")
+            return state.fold()
 
         state.transition("completed", actor=self.k.actor, fence=fence, reason="all stages accepted")
         return state.fold()
@@ -322,6 +335,18 @@ class Engine:
             if not (attempt_dir / "outputs" / name).exists():
                 missing.append(name)
         return missing
+
+    @staticmethod
+    def _restore_worktree(state, worktree) -> None:
+        """Restore the worktree to the last accepted checkpoint commit (§239)."""
+        from .gitrepo import is_repo, reset_hard
+
+        commit = None
+        for ev in state.load_events():
+            if ev["type"] == "checkpoint.created" and ev["data"].get("commit"):
+                commit = ev["data"]["commit"]
+        if commit and is_repo(worktree):
+            reset_hard(worktree, commit)
 
     @staticmethod
     def _accepted_stages(state) -> set[str]:

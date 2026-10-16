@@ -13,3 +13,6 @@ state/index.json
 
 # Per-job worktrees (outside version control, see spec §5.1)
 .work/
+
+# Factory-managed project repositories (nested git repos under projects/)
+projects/*/repo/

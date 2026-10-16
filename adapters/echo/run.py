@@ -48,6 +48,18 @@ def main() -> int:
         written += 1
         emit({"type": "file_written", "path": str(path)})
 
+    # Also write a file into the job worktree so the job branch actually
+    # diverges from the base commit — this is what the merge queue integrates.
+    worktree = request.get("worktree")
+    if worktree:
+        src = Path(worktree) / "src" / f"{stage}.md"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_text(
+            f"# {stage}\n\nProduced by the echo adapter (attempt {attempt}).\n",
+            encoding="utf-8",
+        )
+        emit({"type": "file_written", "path": str(src)})
+
     emit(
         {
             "type": "usage",

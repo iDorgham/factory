@@ -119,6 +119,9 @@ def main(argv: list[str] | None = None) -> int:
     p_cancel.add_argument("job_id")
     p_cancel.add_argument("--reason", default="user cancelled")
 
+    p_jundo = p_job_sub.add_parser("undo", help="Revert the merge of an approved job")
+    p_jundo.add_argument("job_id")
+
     # ops
     sub.add_parser("doctor")
     sub.add_parser("reindex")
@@ -180,6 +183,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(k.job_list(args.project), indent=2))
             elif args.job_cmd == "cancel":
                 result = k.job_cancel(args.job_id, reason=args.reason)
+                print(json.dumps(result, indent=2))
+            elif args.job_cmd == "undo":
+                result = k.job_undo(args.job_id)
                 print(json.dumps(result, indent=2))
 
         elif args.cmd == "doctor":

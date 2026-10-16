@@ -8,6 +8,18 @@ interim record until schemas are versioned in their `$id` (planned for P1).
 
 ## `job.schema.json`
 
+### 2026-10-16 — git checkpoints (`commit`) and the merge record (`merge`)
+- **Change:** added `commit` (`["string", "null"]`) to each `checkpoints` item,
+  and a new `merge` property (`["object", "null"]`) with `event`, `branch`,
+  `base`, `merge_commit`, `conflicts`, `mode`, and `sha`.
+- **Reason:** real git worktrees (spec §6, §7.1): each accepted attempt now
+  records a checkpoint **commit** used to restore the worktree on resume, while
+  the existing `sha` (content hash) still binds approval. The fold sets `merge`
+  from `merge.completed` / `merge.conflict` / `merge.undone` so the dashboard can
+  offer Undo.
+- **Migration:** none required. `commit` is nullable, so older checkpoints
+  without it still validate, and `merge` defaults to `null`.
+
 ### 2026-10-16 — document rework fields on `approval`
 - **Change:** added `decision` and `feedback` to the `approval` object's
   `properties`. Both were already accepted (the object has no
@@ -38,4 +50,11 @@ interim record until schemas are versioned in their `$id` (planned for P1).
 
 ## `event.schema.json`
 
-- No changes yet.
+### 2026-10-16 — merge-queue events
+- **Change:** added `merge.completed`, `merge.conflict`, and `merge.undone` to
+  the event-type enum.
+- **Reason:** the merge queue (§199) and Undo (§21.2) record their outcomes as
+  events so they fold into the job snapshot and survive `reindex`.
+- **Migration:** none required; the enum only widens.
+
+- No other changes yet.

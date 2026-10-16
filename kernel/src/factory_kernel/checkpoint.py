@@ -62,18 +62,28 @@ def result_hash(job_dir: Union[str, Path], worktree: Union[str, Path]) -> str:
 
 def record_checkpoint(state, attempt_dir, job_dir, worktree, stage: str, attempt: int,
                       actor: str, fence: int) -> str:
-    """Record a checkpoint for an accepted attempt: write it and emit the event."""
+    """Record a checkpoint for an accepted attempt: write it and emit the event.
+
+    The ``sha`` is the content hash used for SHA-bound approval (unchanged). The
+    ``commit`` is a git commit of the worktree (spec §237: "a commit ... saved in
+    the attempt record") used to restore the worktree on resume; it is None when
+    no repository is wired in.
+    """
     from .atomic import atomic_write_json
+    from .gitrepo import commit_all, is_repo
 
     sha = result_hash(job_dir, worktree)
+    commit = None
+    if is_repo(worktree):
+        commit = commit_all(worktree, f"factory: {stage} attempt {attempt}")
     atomic_write_json(
         Path(attempt_dir) / "checkpoint.json",
-        {"stage": stage, "attempt": attempt, "sha": sha},
+        {"stage": stage, "attempt": attempt, "sha": sha, "commit": commit},
     )
     state.append_event(
         "checkpoint.created",
         actor=actor,
         fence=fence,
-        data={"stage": stage, "attempt": attempt, "sha": sha},
+        data={"stage": stage, "attempt": attempt, "sha": sha, "commit": commit},
     )
     return sha

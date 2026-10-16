@@ -12,6 +12,7 @@ from typing import Optional
 
 from .atomic import atomic_write_json, read_json
 from .checkpoint import result_hash
+from .gitrepo import add_worktree, git_available, init_repo, is_repo, merge_branch, revert_merge
 from .lease import LeaseManager, LeaseError
 from .profiles import load_profile
 from .schemas import SchemaError, SchemaStore
@@ -89,6 +90,11 @@ class Kernel:
         (proj_dir / "epics").mkdir()
         (proj_dir / "issues").mkdir()
 
+        # The factory-managed repository jobs branch from. Its initial commit is
+        # the project's base commit (spec §6: worktree per job from base commit).
+        if git_available():
+            project["base_commit"] = init_repo(proj_dir / "repo", project=name)
+
         self.schemas.validate("project", project)
         atomic_write_json(proj_dir / "project.json", project)
 
@@ -153,9 +159,15 @@ class Kernel:
         job_dir = self.projects_dir / project / "jobs" / job_id
         job_dir.mkdir(parents=True)
 
-        # Create worktree placeholder (real git worktree would go here)
+        # A real git worktree on branch `factory/<job-id>` from the project's
+        # base commit (spec §198). Falls back to a plain directory when git is
+        # unavailable so the kernel still runs without a repository.
         worktree = self.work_dir / job_id
-        worktree.mkdir(parents=True, exist_ok=True)
+        repo_dir = self.projects_dir / project / "repo"
+        if is_repo(repo_dir) and proj.get("base_commit"):
+            add_worktree(repo_dir, worktree, f"factory/{job_id}", proj["base_commit"])
+        else:
+            worktree.mkdir(parents=True, exist_ok=True)
         (worktree / ".factory_job").write_text(job_id, encoding="utf-8")
 
         state = self._job_state(job_dir)
@@ -232,12 +244,14 @@ class Kernel:
         job_id: str,
         adapter_id: Optional[str] = None,
         check_timeout: int = 600,
+        on_complete=None,
     ) -> dict:
         """Run (or resume) a job through its stage profile."""
         from .engine import Engine
 
         result = Engine(self).execute(
-            job_id, adapter_id=adapter_id, check_timeout=check_timeout
+            job_id, adapter_id=adapter_id, check_timeout=check_timeout,
+            on_complete=on_complete,
         )
         self._reindex()
         return result
@@ -287,7 +301,81 @@ class Kernel:
         finally:
             if lease.current_token() == fence:
                 lease.release(fence)
-        return self.job_execute(job_id, adapter_id=adapter_id)
+        return self.job_execute(job_id, adapter_id=adapter_id, on_complete=self._merge_on_complete)
+
+    def _merge_on_complete(self, job, state, fence) -> str:
+        """Engine completion hook: merge the approved job branch (spec §199).
+
+        Runs while the job is still ``running`` so a conflict can move it to
+        ``blocked`` instead of ``completed``. Returns ``"ok"`` or ``"conflict"``.
+        """
+        repo_dir = self.projects_dir / job["project"] / "repo"
+        proj = self.project_get(job["project"])
+        branch = f"factory/{job['id']}"
+        if not is_repo(repo_dir) or not proj.get("base_commit"):
+            return "ok"
+
+        result = merge_branch(repo_dir, branch, f"factory: merge {job['id']}")
+        if result["ok"]:
+            state.append_event(
+                "merge.completed", actor=self.actor, fence=fence,
+                data={"branch": branch, "base": result.get("base"),
+                      "merge_commit": result.get("merge_commit")},
+                job_id=job["id"],
+            )
+            return "ok"
+        state.append_event(
+            "merge.conflict", actor=self.actor, fence=fence,
+            data={"branch": branch, "base": result.get("base"),
+                  "conflicts": result.get("conflicts", [])},
+            job_id=job["id"],
+        )
+        return "conflict"
+
+    def job_undo(self, job_id: str) -> dict:
+        """Revert the merge of an approved job (spec §21.2, §23: `job undo`)."""
+        job = self.job_status(job_id)
+        job_dir = self._find_job_dir(job_id)
+        merge = job.get("merge") or {}
+        if merge.get("event") != "merge.completed" or not merge.get("merge_commit"):
+            raise KernelError("Job has not been merged; nothing to undo")
+        if self._merge_undone_since(job_dir, merge.get("merge_commit")):
+            raise KernelError("Merge already undone")
+
+        repo_dir = self.projects_dir / job["project"] / "repo"
+        if not is_repo(repo_dir):
+            raise KernelError("Project repository is missing; cannot undo")
+
+        lease = LeaseManager(job_dir, self.actor)
+        fence = lease.acquire()
+        try:
+            outcome = revert_merge(repo_dir, merge["merge_commit"], merge.get("base"))
+            state = self._job_state(job_dir)
+            state.append_event(
+                "merge.undone", actor=self.actor, fence=fence,
+                data={"branch": merge.get("branch"),
+                      "merge_commit": merge["merge_commit"],
+                      "mode": outcome["mode"], "sha": outcome["sha"]},
+                job_id=job_id,
+            )
+        finally:
+            if lease.current_token() == fence:
+                lease.release(fence)
+        self._reindex()
+        return self.job_status(job_id)
+
+    @staticmethod
+    def _merge_undone_since(job_dir: Path, merge_commit: Optional[str]) -> bool:
+        for ev in Kernel._read_events(job_dir):
+            if ev["type"] == "merge.undone" and ev["data"].get("merge_commit") == merge_commit:
+                return True
+        return False
+
+    @staticmethod
+    def _read_events(job_dir: Path) -> list[dict]:
+        from .atomic import read_jsonl
+
+        return read_jsonl(Path(job_dir) / "events.jsonl")
 
     def job_request_changes(self, job_id: str, feedback: str, stage: Optional[str] = None) -> dict:
         """Send feedback from the approval card: re-open the last stage and redo it."""

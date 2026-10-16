@@ -245,7 +245,19 @@ def build_view(kernel, project: Optional[str] = None) -> dict:
         view["timeline"] = _timeline(kernel, detail)
         view["needs_you"] = _needs_you(kernel, detail)
         view["preview"] = _preview(kernel, detail)
+        view["undo"] = _undo_state(detail)
     return view
+
+
+def _undo_state(job: dict) -> dict:
+    """Undo is available when the job has a merge that has not been reverted."""
+    merge = job.get("merge") or {}
+    if merge.get("event") == "merge.completed" and merge.get("merge_commit"):
+        return {"available": True, "job": job["id"],
+                "reason": "revert this merge"}
+    if merge.get("event") == "merge.undone":
+        return {"available": False, "reason": "merge already reverted"}
+    return {"available": False, "reason": "nothing merged yet"}
 
 
 # ----------------------------------------------------------------------
@@ -272,6 +284,8 @@ def dispatch(kernel, body: dict) -> dict:
                     "job": kernel.job_request_changes(body["job_id"], body.get("feedback", ""))}
         if command == "cancel":
             return {"ok": True, "job": kernel.job_cancel(body["job_id"])}
+        if command == "undo":
+            return {"ok": True, "job": kernel.job_undo(body["job_id"])}
         return {"ok": False, "error": f"unknown command '{command}'"}
     except Exception as e:  # report, never crash the server
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -575,7 +589,9 @@ $("go").onclick = () => {
   send({command: "create_job", project: $("project").value, brief});
 };
 $("sample").onclick = () => send({command: "create_sample"});
-$("undo").onclick = () => $("err").textContent = "Undo needs merge — not implemented yet.";
+$("undo").onclick = () => {
+  if (VIEW.undo && VIEW.undo.available) send({command: "undo", job_id: VIEW.undo.job});
+};
 
 async function refresh() {
   try {
