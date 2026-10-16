@@ -7,6 +7,9 @@ import json
 import sys
 from pathlib import Path
 
+from .adapters import AdapterError
+from .checks import CheckError
+from .engine import EngineError
 from .kernel import Kernel, KernelError
 from .lease import LeaseError
 from .profiles import ProfileError
@@ -68,6 +71,15 @@ def main(argv: list[str] | None = None) -> int:
     p_jstatus = p_job_sub.add_parser("status")
     p_jstatus.add_argument("job_id")
 
+    p_jexec = p_job_sub.add_parser("execute", help="Run or resume a job")
+    p_jexec.add_argument("job_id")
+    p_jexec.add_argument("--adapter", default=None, help="Force a specific adapter id")
+    p_jexec.add_argument("--check-timeout", type=int, default=600)
+
+    p_japprove = p_job_sub.add_parser("approve", help="Approve a job at a human gate")
+    p_japprove.add_argument("job_id")
+    p_japprove.add_argument("--adapter", default=None)
+
     p_jlist = p_job_sub.add_parser("list")
     p_jlist.add_argument("--project", default=None)
 
@@ -103,6 +115,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(result, indent=2))
             elif args.job_cmd == "status":
                 print(json.dumps(k.job_status(args.job_id), indent=2))
+            elif args.job_cmd == "execute":
+                result = k.job_execute(
+                    args.job_id, adapter_id=args.adapter, check_timeout=args.check_timeout
+                )
+                print(json.dumps(result, indent=2))
+            elif args.job_cmd == "approve":
+                result = k.job_approve(args.job_id, adapter_id=args.adapter)
+                print(json.dumps(result, indent=2))
             elif args.job_cmd == "list":
                 print(json.dumps(k.job_list(args.project), indent=2))
             elif args.job_cmd == "cancel":
@@ -119,7 +139,8 @@ def main(argv: list[str] | None = None) -> int:
 
         return 0
 
-    except (KernelError, StateError, LeaseError, SchemaError, ProfileError) as e:
+    except (KernelError, StateError, LeaseError, SchemaError, ProfileError,
+            EngineError, CheckError, AdapterError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

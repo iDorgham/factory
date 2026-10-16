@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "factory-kernel"
-version = "0.3.0"
+version = "0.4.0"
 description = "Enterprise AI Software Factory — deterministic kernel (P0 core)"
 readme = "README.md"
 requires-python = ">=3.11"

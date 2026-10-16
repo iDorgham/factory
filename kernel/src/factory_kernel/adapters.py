@@ -1,0 +1,156 @@
+"""Adapter runtime (spec §20).
+
+An adapter is a folder under ``adapters/`` with a ``manifest.json`` and an
+entrypoint. The kernel invokes the entrypoint as a subprocess, passes the run
+request as JSON on stdin, and reads an NDJSON event stream on stdout.
+
+Events: progress | tool_use | file_written | question | usage | heartbeat |
+done | error. Errors are classified transient | capability | budget | fatal.
+
+The kernel owns retries; adapters only report.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional, Union
+
+from .atomic import read_json
+
+# Highest-severity error class seen in a run (used for retry/routing decisions).
+ERROR_CLASSES = {"transient", "capability", "budget", "fatal"}
+
+
+class AdapterError(Exception):
+    pass
+
+
+@dataclass
+class RunResult:
+    ok: bool
+    events: list[dict] = field(default_factory=list)
+    usage: dict = field(default_factory=dict)
+    error: Optional[str] = None
+    error_class: Optional[str] = None
+
+    @property
+    def written_files(self) -> list[str]:
+        return [e["path"] for e in self.events if e.get("type") == "file_written" and "path" in e]
+
+    @property
+    def questions(self) -> list[dict]:
+        return [e for e in self.events if e.get("type") == "question"]
+
+
+class Adapter:
+    def __init__(self, directory: Union[str, Path]):
+        self.dir = Path(directory)
+        manifest = read_json(self.dir / "manifest.json")
+        if not isinstance(manifest, dict) or "id" not in manifest or "entrypoint" not in manifest:
+            raise AdapterError(f"Invalid adapter manifest in {self.dir}")
+        self.manifest = manifest
+        self.id = manifest["id"]
+
+    @property
+    def capabilities(self) -> list[str]:
+        return list(self.manifest.get("capabilities", []))
+
+    @property
+    def roles_supported(self) -> list[str]:
+        return list(self.manifest.get("roles_supported", []))
+
+    def run(self, request: dict, timeout: int = 600) -> RunResult:
+        entry = self.dir / self.manifest["entrypoint"]
+        if not entry.exists():
+            raise AdapterError(f"Adapter entrypoint missing: {entry}")
+
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(entry)],
+                input=json.dumps(request),
+                capture_output=True,
+                text=True,
+                cwd=str(self.dir),
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return RunResult(
+                ok=False,
+                error=f"adapter '{self.id}' timed out",
+                error_class="transient",
+            )
+
+        events: list[dict] = []
+        for line in (proc.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                events.append({"type": "progress", "message": line})
+
+        usage: dict = {}
+        error = None
+        error_class = None
+        ok = False
+        for ev in events:
+            etype = ev.get("type")
+            if etype == "usage":
+                usage = ev
+            elif etype == "done":
+                ok = True
+            elif etype == "error":
+                ok = False
+                error = ev.get("message", "adapter error")
+                cls = ev.get("class") or ev.get("error_class") or "fatal"
+                error_class = cls if cls in ERROR_CLASSES else "fatal"
+
+        if proc.returncode != 0 and not ok:
+            if error is None:
+                error = (proc.stderr or "").strip() or f"adapter exited {proc.returncode}"
+                error_class = error_class or "fatal"
+
+        return RunResult(ok=ok, events=events, usage=usage, error=error, error_class=error_class)
+
+
+def discover_adapters(adapters_dir: Union[str, Path]) -> dict[str, Adapter]:
+    adapters: dict[str, Adapter] = {}
+    directory = Path(adapters_dir)
+    if not directory.exists():
+        return adapters
+    for entry in sorted(directory.iterdir()):
+        if entry.is_dir() and (entry / "manifest.json").exists():
+            try:
+                adapter = Adapter(entry)
+            except AdapterError:
+                continue
+            adapters[adapter.id] = adapter
+    return adapters
+
+
+def select_adapter(
+    adapters: dict[str, Adapter],
+    adapter_id: Optional[str] = None,
+    capabilities: Optional[list[str]] = None,
+    role: Optional[str] = None,
+) -> Adapter:
+    if adapter_id:
+        if adapter_id not in adapters:
+            raise AdapterError(f"Adapter '{adapter_id}' not found")
+        return adapters[adapter_id]
+
+    required = set(capabilities or [])
+    for adapter in adapters.values():
+        if not required.issubset(set(adapter.capabilities)):
+            continue
+        if role and adapter.roles_supported and role not in adapter.roles_supported:
+            continue
+        return adapter
+
+    if adapters:
+        return next(iter(adapters.values()))
+    raise AdapterError("No adapter available")

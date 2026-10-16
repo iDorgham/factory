@@ -1,9 +1,17 @@
 # Enterprise AI Software Factory — Architecture (Built from Scratch)
 
-**Version:** 3.0 (P0 Kernel Core)  
+**Version:** 3.0 (P1 Solo slice — in progress)  
 **Status:** Runnable reference implementation of the specification
 
 > Files are the protocol. Events are the truth. A small kernel enforces. Agents only propose.
+
+## Documentation
+
+- [docs/](docs/README.md) — index of all documentation
+- [PRD](docs/PRD.md) — product requirements, personas, features per mode
+- [Architecture](docs/ARCHITECTURE.md) — design & architecture of the implemented system
+- [Roadmap](docs/plans/ROADMAP.md) — phases P0–P5 with status and per-phase plans
+- [Specification v3.0](docs/Enterprise%20AI%20Software%20Factory%20—%20Specification%20v3.0.md) — canonical specification
 
 ## What was built
 
@@ -19,11 +27,15 @@ This directory is a complete, working skeleton of the factory architecture descr
 | Lease locks + fencing tokens | ✅ | `kernel/src/factory_kernel/lease.py` |
 | Job state machine + event fold | ✅ | `kernel/src/factory_kernel/state.py` |
 | Kernel (project/job lifecycle) | ✅ | `kernel/src/factory_kernel/kernel.py` |
+| Stage-graph engine + build loop (no-progress → `stalled`) | ✅ | `kernel/src/factory_kernel/engine.py` |
+| Check runner + failure fingerprints | ✅ | `kernel/src/factory_kernel/checks.py` |
+| Context-manifest builder | ✅ | `kernel/src/factory_kernel/context.py` |
+| Adapter runtime (discover / select / run) | ✅ | `kernel/src/factory_kernel/adapters.py` |
 | CLI (`factory` command) | ✅ | `factory` launcher + `cli.py` |
 | Stage profile loader + validation (lite/standard) | ✅ | `kernel/src/factory_kernel/profiles.py` |
 | JSON Schema validation on every kernel write | ✅ | `kernel/src/factory_kernel/schemas.py` |
 | Cross-platform atomic writes (Windows-safe) | ✅ | `kernel/src/factory_kernel/atomic.py` |
-| Test suite (109 pytest cases) | ✅ | `tests/` |
+| Test suite (142 pytest cases) | ✅ | `tests/` |
 | Role definitions (8 → 5 starter) | ✅ | `roles/` |
 | Echo adapter stub | ✅ | `adapters/echo/` |
 | `factory doctor` (chain check, leases, repair) + `reindex` | ✅ | Implemented |
@@ -74,6 +86,12 @@ cd factory
 # Start a job
 ./factory job run demo "Build a landing page with hero and contact form"
 
+# Execute it through the lite stage graph (understand → plan → build → verify → approve)
+./factory job execute <job-id>
+
+# The 'approve' gate parks the job at awaiting_human; approve to finish
+./factory job approve <job-id>
+
 # Inspect
 ./factory job list
 ./factory job status <job-id>
@@ -108,7 +126,7 @@ Clients (CLI / future dashboard)
 
 ## Next phases (from the specification roadmap)
 
-- **P1 Solo slice** — full lite profile execution, one real adapter, build loop with no-progress detection, `factory serve` dashboard, SHA-bound approval.
+- **P1 Solo slice** (in progress) — lite-profile execution through the stage-graph engine ✅, adapter runtime + echo adapter ✅, build loop with no-progress detection ✅; still to come: real git worktrees + checkpoints, a real coding-agent adapter + conformance suite, `factory serve` dashboard, SHA-bound approval and undo.
 - **P2 Trust layer** — budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline.
 - **P3 Team** — concurrent jobs, merge queue, RBAC, audit chain.
 - **P4 Enterprise** — brands, design-system checks, compliance export, change windows.
@@ -133,8 +151,9 @@ Install the dev dependencies and run the suite:
 
 ```bash
 pip install -e ".[dev]"     # or: pip install pytest pyyaml jsonschema flake8
-python -m pytest            # 109 tests: atomic, ulid, hashing, lease, state,
-                            #   transitions, profiles, schemas, kernel, doctor
+python -m pytest            # 142 tests: atomic, ulid, hashing, lease, state,
+                            #   transitions, profiles, schemas, kernel, doctor,
+                            #   engine, checks, context, adapters
 python -m flake8 kernel/src tests   # lint (config in .flake8)
 ```
 

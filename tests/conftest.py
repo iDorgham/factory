@@ -27,6 +27,7 @@ def factory_root(tmp_path: Path) -> Path:
     (root / "kernel").mkdir(parents=True)
     for sub in ("schemas", "presets", "stages"):
         shutil.copytree(REPO_ROOT / "kernel" / sub, root / "kernel" / sub)
+    shutil.copytree(REPO_ROOT / "adapters", root / "adapters")
     shutil.copy(REPO_ROOT / "factory.json", root / "factory.json")
     return root
 

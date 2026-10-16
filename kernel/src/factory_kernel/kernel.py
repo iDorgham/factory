@@ -37,6 +37,7 @@ class Kernel:
         self.presets_dir = self.root / "kernel" / "presets"
         self.stages_dir = self.root / "kernel" / "stages"
         self.schemas_dir = self.root / "kernel" / "schemas"
+        self.adapters_dir = self.root / "adapters"
         self.schemas = SchemaStore(self.schemas_dir)
 
         # Ensure core dirs exist
@@ -224,6 +225,40 @@ class Kernel:
 
     def job_cancel(self, job_id: str, reason: str = "user cancelled") -> dict:
         return self.job_transition(job_id, "cancelled", reason=reason)
+
+    def job_execute(
+        self,
+        job_id: str,
+        adapter_id: Optional[str] = None,
+        check_timeout: int = 600,
+    ) -> dict:
+        """Run (or resume) a job through its stage profile."""
+        from .engine import Engine
+
+        result = Engine(self).execute(
+            job_id, adapter_id=adapter_id, check_timeout=check_timeout
+        )
+        self._reindex()
+        return result
+
+    def job_approve(self, job_id: str, adapter_id: Optional[str] = None) -> dict:
+        """Approve a job parked at a human gate and resume execution."""
+        job = self.job_status(job_id)
+        if job["state"] != "awaiting_human":
+            raise KernelError(f"Job is '{job['state']}'; nothing to approve")
+        job_dir = self._find_job_dir(job_id)
+        lease = LeaseManager(job_dir, self.actor)
+        fence = lease.acquire()
+        try:
+            state = self._job_state(job_dir)
+            state.append_event(
+                "human.approval", actor=self.actor, fence=fence,
+                data={"decision": "approved"}, job_id=job_id,
+            )
+        finally:
+            if lease.current_token() == fence:
+                lease.release(fence)
+        return self.job_execute(job_id, adapter_id=adapter_id)
 
     # ------------------------------------------------------------------
     # Doctor & reindex

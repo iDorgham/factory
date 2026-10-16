@@ -4,6 +4,9 @@ from .state import JobState, StateError, verify_chain
 from .lease import LeaseManager, LeaseError
 from .schemas import SchemaStore, SchemaError
 from .profiles import load_profile, validate_profile, ProfileError
+from .engine import Engine, EngineError
+from .checks import CheckResult, CheckError, run_checks, summarise
+from .adapters import Adapter, AdapterError, RunResult, discover_adapters
 
 __all__ = [
     "Kernel",
@@ -18,5 +21,15 @@ __all__ = [
     "load_profile",
     "validate_profile",
     "ProfileError",
+    "Engine",
+    "EngineError",
+    "CheckResult",
+    "CheckError",
+    "run_checks",
+    "summarise",
+    "Adapter",
+    "AdapterError",
+    "RunResult",
+    "discover_adapters",
 ]
-__version__ = "0.3.0"
+__version__ = "0.4.0"
