@@ -17,6 +17,7 @@ KINDS = {
     "job": "job.schema.json",
     "project": "project.schema.json",
     "context.manifest": "context.manifest.schema.json",
+    "authorizations": "authorizations.schema.json",
 }
 
 

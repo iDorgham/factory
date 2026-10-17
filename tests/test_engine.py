@@ -233,3 +233,100 @@ def _adapters(kernel):
     from factory_kernel.adapters import discover_adapters
 
     return discover_adapters(kernel.adapters_dir)
+
+
+# ----------------------------------------------------------------------
+# P2.1: guards over the diff (spec §9.3)
+# ----------------------------------------------------------------------
+
+def _install_test_deleter(kernel):
+    """Copy the guard fixture adapter into the factory tree under test."""
+    import shutil
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    src = root / "tests" / "fixtures" / "adapters" / "test-deleter"
+    dst = kernel.adapters_dir / "test-deleter"
+    dst.mkdir(parents=True, exist_ok=True)
+    shutil.copy(src / "run.py", dst / "run.py")
+    shutil.copy(src / "manifest.json", dst / "manifest.json")
+
+
+def _seed_test_file(worktree):
+    """Commit a test file into the job worktree so its deletion is a diff."""
+    from factory_kernel.gitrepo import commit_all
+
+    tests_dir = worktree / "tests"
+    tests_dir.mkdir(parents=True, exist_ok=True)
+    (tests_dir / "test_app.py").write_text("def test_a(): ...\n", encoding="utf-8")
+    commit_all(worktree, "chore: seed tests")
+
+
+def test_guard_violation_fails_attempt_and_stalls(demo_job):
+    import json
+
+    kernel, job = demo_job
+    _install_test_deleter(kernel)
+    _seed_test_file(kernel.work_dir / job["id"])
+
+    result = kernel.job_execute(job["id"], adapter_id="test-deleter")
+    # The deletion repeats identically every round; the guard feeds the
+    # fingerprint, so the existing no-progress detection stalls the job.
+    assert result["state"] == "stalled"
+
+    job_dir = kernel._find_job_dir(job["id"])
+    events = kernel._job_state(job_dir).load_events()
+
+    # The attempt is failed by the guard even though every check passed.
+    finished = [e for e in events if e["type"] == "stage.attempt_finished"
+                and e["data"].get("stage") == "build"]
+    assert finished and all(e["data"]["status"] == "failed" for e in finished)
+
+    # A guard.violation event, kernel-actor, per guard with violations.
+    violation = next(e for e in events if e["type"] == "guard.violation")
+    assert violation["data"]["guard"] == "no_test_deletion"
+    assert any(v["path"] == "tests/test_app.py" and v["kind"] == "deleted"
+               for v in violation["data"]["violations"])
+
+    # guards.json summary next to checks.json for the attempt.
+    guards1 = json.loads(
+        (job_dir / "stages" / "02-build" / "attempt-1" / "guards.json").read_text())
+    assert any(r["guard"] == "no_test_deletion" and r["violations"]
+               for r in guards1["results"])
+
+
+def test_guards_completed_on_clean_diff(demo_job):
+    kernel, job = demo_job
+    kernel.job_execute(job["id"])
+
+    events = kernel._job_state(kernel._find_job_dir(job["id"])).load_events()
+    completed = [e for e in events if e["type"] == "guards.completed"
+                 and e["data"].get("stage") == "build"]
+    assert completed, "the build stage declares guards; they must run"
+    assert completed[0]["data"]["violations"] == []
+
+
+def test_guard_violation_surfaces_on_dashboard(demo_job):
+    from factory_kernel.dashboard import build_view
+
+    kernel, job = demo_job
+    _install_test_deleter(kernel)
+    _seed_test_file(kernel.work_dir / job["id"])
+    kernel.job_execute(job["id"], adapter_id="test-deleter")
+
+    view = build_view(kernel)
+    phrases = [step["phrase"] for step in view["timeline"]]
+    assert any("⚠ Guard flagged deleted tests" in p for p in phrases), phrases
+
+
+def test_doctor_rejects_invalid_authorization_document(kernel, demo_job):
+    from factory_kernel.atomic import atomic_write_json
+
+    kernel, job = demo_job
+    job_dir = kernel._find_job_dir(job["id"])
+    atomic_write_json(job_dir / "authorizations.json",
+                      {"allow_test_deletions": ["tests/secret.py"]})  # typo'd key
+
+    report = kernel.doctor()
+    assert report["ok"] is False
+    assert any("authorizations" in e for e in report["errors"])

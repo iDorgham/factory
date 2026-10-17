@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory.local/schemas/authorizations.schema.json",
+  "title": "Guard authorizations (P2.1)",
+  "description": "Structural, kernel-validated statement of which test deletions and dependency/lockfile changes a job is explicitly allowed to perform. Attached per job at projects/<name>/jobs/<id>/authorizations.json. Authorization is by exact path only: no globs, no wildcards, no pattern prefixes — a human authorizes a concrete file they can name and inspect, which keeps the guard comparison a deterministic string equality and cannot be widened to whole directories by writing one clever entry.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "allowed_test_deletions": {
+      "type": "array",
+      "description": "Test file paths (POSIX, relative to the worktree root) that may be deleted or have assertions weakened without triggering no_test_deletion.",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "allowed_dep_changes": {
+      "type": "array",
+      "description": "Dependency manifest and lockfile paths (POSIX, relative to the worktree root) that may be created/modified without triggering no_lockfile_surprise.",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "reason": {
+      "type": "string",
+      "description": "Optional human-readable justification. Guards never read this; audit and dashboards may."
+    },
+    "authorized_by": {
+      "type": "string",
+      "description": "Optional identity of the human who authorized the exceptions. Guards never read this; audit and dashboards may."
+    }
+  }
+}

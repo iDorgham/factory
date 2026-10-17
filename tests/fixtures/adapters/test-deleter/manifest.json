@@ -1,0 +1,7 @@
+{
+  "id": "test-deleter",
+  "entrypoint": "run.py",
+  "capabilities": [],
+  "roles_supported": ["analyst", "planner", "builder", "verifier", "integrator"],
+  "description": "P2.1 guard test fixture: deletes tests/test_app.py in the worktree during the build stage."
+}

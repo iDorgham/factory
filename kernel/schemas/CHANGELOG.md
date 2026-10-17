@@ -6,6 +6,32 @@ to a file under `kernel/schemas/` is recorded here with its migration.
 The schema files do not carry an explicit `version` field yet; this log is the
 interim record until schemas are versioned in their `$id` (planned for P1).
 
+## `authorizations.schema.json`
+
+### 2026-10-17 — new file type (`P2.1 guards`)
+- **Change:** new schema for a kernel-owned per-job `authorizations.json`
+  (`allowed_test_deletions`, `allowed_dep_changes` — exact-path arrays, plus
+  optional `reason`/`authorized_by`).
+- **Reason:** guard authorization must be structurally validated, not parsed
+  out of `plan.md` prose (spec §9.3: "without an explicit plan task that
+  authorizes it"). The engine loads it from the job directory and validates it
+  before any guard runs; a structurally invalid file fails hard rather than
+  silently meaning "no authorization".
+- **Migration:** none required. New optional file; absence is the empty default.
+
+## `event.schema.json`
+
+### 2026-10-17 — guard events (`P2.1 guards`)
+- **Change:** added `guards.completed` and `guard.violation` to the event-type
+  enum.
+- **Reason:** guards (spec §9.3) run per attempt as kernel functions over the
+  diff; their verdicts become first-class events like checks (`checks.completed`
+  symmetry). Violations also feed the attempt fingerprint so a repeated
+  identical violation triggers the existing stalled detection instead of
+  burning every retry round.
+- **Migration:** none required. Enum extension only; old logs contain neither
+  type.
+
 ## `job.schema.json`
 
 ### 2026-10-16 — blocking-question ledger (`questions`)

@@ -20,6 +20,8 @@
         "stage.accepted",
         "stage.rejected",
         "checks.completed",
+        "guards.completed",
+        "guard.violation",
         "gate.evaluated",
         "human.approval",
         "human.answer",
