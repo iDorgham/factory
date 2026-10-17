@@ -497,6 +497,7 @@ class Kernel:
         self._doctor_profile_guards(report)
         self._doctor_budgets(report)
         self._doctor_sandbox(report)
+        self._doctor_risk(report)
 
         for proj_dir in sorted(self.projects_dir.iterdir()):
             if not proj_dir.is_dir():
@@ -749,6 +750,74 @@ class Kernel:
             report["warnings"].append(
                 f"Sandbox strict_cwd is {state_word} — adapter processes "
                 "are not confined to the job worktree")
+
+    def _doctor_risk(self, report: dict) -> None:
+        """Risk-scoring configuration integrity (P2.4 — spec §5.3).
+
+        Read-only, order-stable, deterministic; the ``risk_scoring`` section
+        is re-read from disk at check time, exactly like the sandbox and
+        budget checks (doctor inspects the tree as it is, not the snapshot
+        taken at kernel init):
+
+        - the section must validate against ``risk.schema.json`` —
+          authoritative, because a corrupt risk config means the kernel
+          cannot compute the score the gate will act on;
+        - ``gate_actions`` — authoritative, on top of the schema shape: the
+          band→action map is kernel-owned; a config that could set
+          ``high: "auto_advance"`` would let tuning negotiate the safety
+          floor away, so doctor names the ownership violation explicitly;
+        - zero (or negative) weights — advisory: disabling a signal is a
+          valid choice, but the operator should see that it will not
+          contribute to the score;
+        - non-monotonic thresholds — advisory: ``load_risk_config`` refuses
+          them at runtime (the engine fails deterministically), doctor
+          surfaces it earlier so no job has to die of it.
+        """
+        cfg = read_json(self.root / "factory.json", {}) or {}
+        section = cfg.get("risk_scoring")
+        if section is None:
+            return  # absent -> the kernel defaults are valid by construction
+        if not isinstance(section, dict):
+            self._fail(report, "factory.json risk_scoring is schema-invalid: "
+                       "must be an object")
+            return
+        if "gate_actions" in section:
+            self._fail(report,
+                       "factory.json risk_scoring contains 'gate_actions' — "
+                       "the kernel owns the band→action map and does not "
+                       "allow configuration")
+        try:
+            self.schemas.validate("risk", section)
+        except SchemaError as e:
+            self._fail(report,
+                       f"factory.json risk_scoring is schema-invalid: {e}")
+            return
+
+        weights = section.get("weights") or {}
+        for key in sorted(weights):
+            value = weights[key]
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue  # schema-invalid cases already failed above
+            if value <= 0:
+                report["warnings"].append(
+                    f"Risk weight for {key} is {value} — this signal will "
+                    "not contribute to the score")
+
+        thresholds = section.get("thresholds") or {}
+        low, medium, high = (thresholds.get("low"), thresholds.get("medium"),
+                             thresholds.get("high"))
+        if (isinstance(low, int) and isinstance(medium, int)
+                and not isinstance(low, bool) and not isinstance(medium, bool)
+                and low >= medium):
+            report["warnings"].append(
+                f"Risk thresholds are not monotonically increasing: "
+                f"{low} >= {medium}")
+        elif (isinstance(medium, int) and isinstance(high, int)
+                and not isinstance(medium, bool) and not isinstance(high, bool)
+                and medium > high):
+            report["warnings"].append(
+                f"Risk thresholds are not monotonically increasing: "
+                f"{medium} > {high}")
 
     def _doctor_job(self, report: dict, proj_dir: Path, job_dir: Path, now: datetime) -> None:
         label = f"{proj_dir.name}/{job_dir.name}"

@@ -397,3 +397,84 @@ class TestEngineRiskGate:
                          if e["type"] == "risk.computed"}
         assert "understand" not in scored_stages
         assert "approve" not in scored_stages  # gate: required never scores
+
+
+# ----------------------------------------------------------------------
+# Doctor risk-scoring integrity checks (red: Step 4)
+# ----------------------------------------------------------------------
+
+class TestDoctorRisk:
+    def test_shipped_tree_reports_clean_risk(self, kernel):
+        report = kernel.doctor()
+        assert report["ok"] is True
+        assert not any("risk" in e.lower() for e in report["errors"]), \
+            report["errors"]
+        assert not any(w.startswith("Risk") for w in report["warnings"]), \
+            report["warnings"]
+
+    def test_doctor_flags_invalid_risk_section(self, kernel):
+        cfg = read_json(kernel.root / "factory.json")
+        cfg["risk_scoring"]["weights"]["check_failure"] = -15
+        (kernel.root / "factory.json").write_text(
+            json.dumps(cfg, indent=2), encoding="utf-8")
+
+        report = kernel.doctor()
+        assert report["ok"] is False
+        assert any(e.startswith("factory.json risk_scoring is schema-invalid:")
+                   for e in report["errors"]), report["errors"]
+
+    def test_doctor_rejects_kernel_map_override(self, kernel):
+        # A config-settable band-to-action map would let tuning negotiate
+        # the safety floor away (high -> auto_advance); the doctor names it
+        # as the kernel-ownership violation it is, not a mere typo.
+        cfg = read_json(kernel.root / "factory.json")
+        cfg["risk_scoring"]["gate_actions"] = {
+            "low": "auto_advance",
+            "medium": "awaiting_human",
+            "high": "blocked",
+        }
+        (kernel.root / "factory.json").write_text(
+            json.dumps(cfg, indent=2), encoding="utf-8")
+
+        report = kernel.doctor()
+        assert report["ok"] is False
+        assert any(e.startswith(
+                       "factory.json risk_scoring contains 'gate_actions'")
+                   and "kernel owns" in e
+                   for e in report["errors"]), report["errors"]
+
+    def test_doctor_warns_on_zero_weights(self, kernel):
+        cfg = read_json(kernel.root / "factory.json")
+        cfg["risk_scoring"]["weights"]["check_failure"] = 0
+        cfg["risk_scoring"]["weights"]["guard_violation"] = 0
+        (kernel.root / "factory.json").write_text(
+            json.dumps(cfg, indent=2), encoding="utf-8")
+
+        report = kernel.doctor()
+        assert report["ok"] is True  # valid: a signal may be disabled
+        weight_notes = [w for w in report["warnings"]
+                        if w.startswith("Risk weight")]
+        # Order-stable: sorted by signal name, then nothing else.
+        assert weight_notes == [
+            "Risk weight for check_failure is 0 — this signal will not "
+            "contribute to the score",
+            "Risk weight for guard_violation is 0 — this signal will not "
+            "contribute to the score",
+        ], report["warnings"]
+
+    def test_doctor_warns_on_non_monotonic_thresholds(self, kernel):
+        cfg = read_json(kernel.root / "factory.json")
+        cfg["risk_scoring"]["thresholds"] = {"low": 50, "medium": 50,
+                                             "high": 100}
+        (kernel.root / "factory.json").write_text(
+            json.dumps(cfg, indent=2), encoding="utf-8")
+
+        report = kernel.doctor()
+        assert report["ok"] is True  # advisory: the loader stops it at runtime
+        assert any(w.startswith(
+                       "Risk thresholds are not monotonically increasing: "
+                       "50 >= 50")
+                   and "this signal will not" not in w
+                   for w in report["warnings"]), report["warnings"]
+        assert not any(w.startswith("Risk weight")
+                       for w in report["warnings"])
