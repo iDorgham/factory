@@ -31,7 +31,8 @@ def main() -> int:
         path.write_text(f"# {name}\n", encoding="utf-8")
 
     secret_names = ["GITHUB_TOKEN", "SSH_AUTH_SOCK", "HTTP_PROXY",
-                    "SECRET_API_KEY", "AWS_SECRET_ACCESS_KEY"]
+                    "SECRET_API_KEY", "AWS_SECRET_ACCESS_KEY",
+                    "FACTORY_JOB_ID", "FACTORY_ATTEMPT_DIR"]
     emit({
         "type": "progress",
         "message": f"env-probe: stage={request.get('stage', '?')}",

@@ -62,7 +62,16 @@ class Adapter:
     def roles_supported(self) -> list[str]:
         return list(self.manifest.get("roles_supported", []))
 
-    def run(self, request: dict, timeout: int = 600) -> RunResult:
+    def run(self, request: dict, timeout: int = 600,
+            cwd: Optional[Path] = None, env: Optional[dict] = None) -> RunResult:
+        """Run the adapter entrypoint.
+
+        ``cwd``/``env`` are the sandbox channel (P2.3): the engine passes a
+        sanitized environment and, under ``strict_cwd``, the job worktree.
+        Defaults preserve the pre-sandbox behavior — adapter directory and
+        the inheriting process env — which the operator-side conformance
+        harness (a trusted tool run by the operator) keeps using.
+        """
         entry = (self.dir / self.manifest["entrypoint"]).resolve()
         if not entry.exists():
             raise AdapterError(f"Adapter entrypoint missing: {entry}")
@@ -73,7 +82,8 @@ class Adapter:
                 input=json.dumps(request),
                 capture_output=True,
                 text=True,
-                cwd=str(self.dir),
+                cwd=str(cwd) if cwd is not None else str(self.dir),
+                **({"env": dict(env)} if env is not None else {}),
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:

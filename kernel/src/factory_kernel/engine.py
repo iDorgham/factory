@@ -8,6 +8,8 @@ every event; the agent only writes files.
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from typing import Optional
 
 from .adapters import AdapterError, RunResult, discover_adapters, select_adapter
@@ -15,6 +17,8 @@ from .atomic import atomic_write_json, read_json
 from .budgets import BudgetContext, BudgetError, check_budget, stage_limits
 from .checkpoint import record_checkpoint
 from .checks import fingerprint, load_checks, run_checks, summarise
+from .sandbox import SandboxError, SandboxPolicy, load_sandbox_policy, \
+    resolve_under, sanitize_env
 from .context import collect_stage_context
 from .gitrepo import collect_diff, head
 from .guards import GuardContext, GuardError, run_guards
@@ -583,6 +587,14 @@ class Engine:
     def _invoke_adapter(self, adapter, job, stage, attempt, attempt_dir, worktree, manifest, fence):
         budget = stage["budget"]
         timeout = min(int(budget.get("minutes", 30) * 60) or 600, ADAPTER_TIMEOUT_CAP)
+        # Sandboxing (P2.3): the contract is read from config per call and
+        # both paths the subprocess will receive are proven contained before
+        # anything can see them. An escape fails this adapter run as 'fatal'.
+        policy = self._sandbox_policy()
+        try:
+            self._check_sandbox_paths(attempt_dir, worktree)
+        except SandboxError as e:
+            return RunResult(ok=False, error=f"sandbox: {e}", error_class="fatal")
         request = {
             "run_id": new_ulid(),
             "job_id": job["id"],
@@ -599,9 +611,55 @@ class Engine:
             "fence": fence,
         }
         try:
-            return adapter.run(request, timeout=timeout)
+            return adapter.run(request, timeout=timeout,
+                               cwd=self._sandbox_cwd(policy, worktree),
+                               env=self._sandbox_env(policy, job, stage,
+                                                     attempt, attempt_dir,
+                                                     worktree))
         except AdapterError as e:
             return RunResult(ok=False, error=str(e), error_class="fatal")
+
+    def _sandbox_policy(self) -> SandboxPolicy:
+        """Parse the sandbox contract from the kernel's config (pure).
+
+        Loaded per invocation so the policy always matches the config the
+        tree carries now; deterministic — same config, same policy.
+        """
+        return load_sandbox_policy((self.k.factory_cfg or {}).get("sandbox")
+                                   or {})
+
+    @staticmethod
+    def _sandbox_env(policy: SandboxPolicy, job, stage, attempt, attempt_dir,
+                     worktree) -> dict:
+        """The subprocess sees only the allowlist intersection of the
+        kernel's env (P2.3: isolation by default), plus the kernel-reserved
+        ``FACTORY_*`` attribution the kernel injects — it owns that
+        namespace and overrides anything an operator may carry under it.
+        """
+        env = sanitize_env(dict(os.environ), policy.env_allowlist)
+        env["FACTORY_JOB_ID"] = job["id"]
+        env["FACTORY_STAGE"] = stage["id"]
+        env["FACTORY_ATTEMPT"] = str(attempt)
+        env["FACTORY_ATTEMPT_DIR"] = str(Path(attempt_dir).absolute())
+        env["FACTORY_WORKTREE"] = str(Path(worktree).absolute())
+        return env
+
+    @staticmethod
+    def _sandbox_cwd(policy: SandboxPolicy, worktree) -> Optional[Path]:
+        """Adapter cwd: the job worktree under ``strict_cwd``, else the
+        adapter's own directory (legacy default, never a player choice)."""
+        return Path(worktree) if policy.strict_cwd else None
+
+    def _check_sandbox_paths(self, attempt_dir, worktree):
+        """Assert both sandbox roots sit inside the factory tree.
+
+        A path the kernel itself builds is player-untrusted input once it
+        travels; lexical containment (pure ``resolve_under``) proves it
+        stays inside the root before any subprocess sees it. Escapes raise
+        ``SandboxError`` and fail the attempt deterministically.
+        """
+        resolve_under(self.k.root, str(attempt_dir))
+        resolve_under(self.k.root, str(worktree))
 
     @staticmethod
     def _missing_outputs(stage, attempt_dir) -> list[str]:

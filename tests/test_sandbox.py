@@ -110,7 +110,10 @@ class TestSanitizeEnv:
         from factory_kernel.sandbox import sanitize_env
 
         kept = sanitize_env(LEAKY_ENV, SHIPPED_ALLOWLIST)
-        assert sorted(kept) == ["PATH"]  # no leaked secret survives
+        # The kernel's reserved attribution (FACTORY_JOB_ID) survives by
+        # design; none of the leaked secrets do (declared fix: my Step 2
+        # expectation forgot the reserved prefix).
+        assert sorted(kept) == ["FACTORY_JOB_ID", "PATH"]
         assert kept["PATH"] == "/usr/bin"
 
     def test_factory_prefix_kept_by_wildcard(self):
@@ -278,13 +281,18 @@ class TestAdapterSubprocess:
         return Adapter(adapter_dir)
 
     def test_explicit_env_replaces_inherited_env(self, tmp_path, monkeypatch):
-        from factory_kernel.adapters import RunResult
+        from types import SimpleNamespace
+
+        import json as _json
 
         captured = {}
 
         def fake_run(cmd, **kwargs):
             captured.update(kwargs)
-            return RunResult(ok=True, events=[{"type": "done"}])
+            # CompletedProcess-like: the adapter parses stdout as NDJSON.
+            return SimpleNamespace(
+                stdout=_json.dumps({"type": "done"}) + "\n",
+                stderr="", returncode=0)
 
         monkeypatch.setattr("factory_kernel.adapters.subprocess.run", fake_run)
         adapter = self._adapter(tmp_path)
@@ -297,13 +305,17 @@ class TestAdapterSubprocess:
         assert captured["env"] == {"PATH": "/usr/bin"}
 
     def test_defaults_preserve_today_behavior(self, tmp_path, monkeypatch):
-        from factory_kernel.adapters import RunResult
+        from types import SimpleNamespace
+
+        import json as _json
 
         captured = {}
 
         def fake_run(cmd, **kwargs):
             captured.update(kwargs)
-            return RunResult(ok=True, events=[{"type": "done"}])
+            return SimpleNamespace(
+                stdout=_json.dumps({"type": "done"}) + "\n",
+                stderr="", returncode=0)
 
         monkeypatch.setattr("factory_kernel.adapters.subprocess.run", fake_run)
         adapter = self._adapter(tmp_path)
