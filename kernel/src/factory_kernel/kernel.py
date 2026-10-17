@@ -13,6 +13,7 @@ from typing import Optional
 import yaml
 
 from .atomic import atomic_write_json, read_json
+from .budgets import BudgetError, stage_limits
 from .checkpoint import result_hash
 from .gitrepo import add_worktree, git_available, init_repo, is_repo, merge_branch, revert_merge
 from .guards import GUARDS
@@ -494,6 +495,7 @@ class Kernel:
             )
 
         self._doctor_profile_guards(report)
+        self._doctor_budgets(report)
 
         for proj_dir in sorted(self.projects_dir.iterdir()):
             if not proj_dir.is_dir():
@@ -561,6 +563,147 @@ class Kernel:
                 f"Stage {stage_name} declares guard {guard_id} but it is not "
                 f"registered (fix stages/{filename})"
             )
+
+    def _doctor_budgets(self, report: dict) -> None:
+        """Budget configuration integrity (P2.2 — spec §5.3, §12.1).
+
+        Read-only and order-stable: profile findings sorted by stage name,
+        usage findings by stage path then metric name. Checks:
+
+        - ``price_table`` in ``factory.json`` must validate against
+          ``price_table.schema.json`` — authoritative, because a corrupt
+          table means nothing can be priced (the runtime refuses instead of
+          guessing a cost). Re-read from disk: doctor inspects the tree as
+          it is, not the config snapshot taken at kernel init.
+        - per-stage soft/hard inversion — advisory: the runtime
+          ``stage_limits()`` already fails any attempt deterministically
+          (``BudgetError``); doctor surfaces it at boot instead of mid-job.
+          Wording mirrors the runtime error message exactly, doctor + file
+          location appended.
+        - unpriced usage — advisory: a model absent from the table is priced
+          at the ``'default'`` tier when it exists (worth knowing, estimates
+          may be off) and fails deterministically when it does not; and a
+          ``*_tokens`` metric whose rate the tier lacks fails at runtime.
+          Doctor names both before the spend happens, aggregated per job
+          because a job's attempts repeat the same usage shape.
+        """
+        cfg = read_json(self.root / "factory.json", {}) or {}
+        raw_table = cfg.get("price_table")
+        table = raw_table if isinstance(raw_table, dict) else {}
+        try:
+            self.schemas.validate("price_table", table)
+        except SchemaError as e:
+            self._fail(report, f"factory.json price_table is schema-invalid: {e}")
+            table = None
+
+        self._doctor_profile_budgets(report)
+        if table is not None:
+            self._doctor_usage_pricing(report, table)
+
+    def _doctor_profile_budgets(self, report: dict) -> None:
+        """Advisory: every stage budget must be usable by ``stage_limits``."""
+        if not self.stages_dir.exists():
+            return
+        problems = []
+        for path in sorted(self.stages_dir.glob("*.yaml")):
+            try:
+                doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            except (yaml.YAMLError, OSError) as e:
+                self._fail(report, f"stages/{path.name}: unreadable YAML ({e})")
+                continue
+            if not isinstance(doc, dict):
+                self._fail(report, f"stages/{path.name}: malformed profile")
+                continue
+            for stage in doc.get("stages") or []:
+                sid = str(stage.get("id") or "?")
+                budget = stage.get("budget")
+                if not isinstance(budget, dict) or not budget:
+                    continue  # no declaration, nothing to advise (runtime skips)
+                try:
+                    stage_limits(budget)
+                except BudgetError as e:
+                    problems.append((sid, str(e), path.name))
+        for sid, detail, filename in sorted(problems, key=lambda p: (p[0], p[1])):
+            report["warnings"].append(
+                f"Stage {sid} {detail} (fix stages/{filename})")
+
+    def _doctor_usage_pricing(self, report: dict, table: dict) -> None:
+        """Advisory: usage.json pricing coverage across recorded attempts.
+
+        Findings aggregate per job: a job's attempts report the same shape
+        repeatedly, so per-file findings would flood the report (Solo
+        promise — the report must inform, not bury). Emission order stays
+        deterministic: jobs by path, then model names, then metric names.
+        """
+        for proj_dir in sorted(self.projects_dir.iterdir()):
+            if not proj_dir.is_dir():
+                continue
+            jobs_dir = proj_dir / "jobs"
+            if not jobs_dir.is_dir():
+                continue
+            for job_dir in sorted(jobs_dir.iterdir()):
+                stages_dir = job_dir / "stages"
+                if not stages_dir.is_dir():
+                    continue
+                usage_paths = sorted(
+                    stages_dir.glob("*/attempt-*/usage.json"))
+                if not usage_paths:
+                    continue
+                self._doctor_job_usage(report, table, jobs_dir,
+                                       proj_dir.name, job_dir.name,
+                                       usage_paths)
+
+    def _doctor_job_usage(self, report: dict, table: dict, jobs_dir: Path,
+                          project: str, job: str, usage_paths) -> None:
+        """Findings for every usage record inside one job (aggregated)."""
+        model_counts: dict[str, int] = {}
+        metric_counts: dict[tuple, int] = {}
+        for usage_path in usage_paths:
+            usage = read_json(usage_path, {}) or {}
+            if not isinstance(usage, dict):
+                continue
+            model = usage.get("model")
+            tier_name = "default" if "default" in table else None
+            if isinstance(model, str) and model:
+                if model in table:
+                    tier_name = model
+                else:
+                    model_counts[model] = model_counts.get(model, 0) + 1
+            if tier_name and isinstance(table.get(tier_name), dict):
+                rates = table[tier_name]
+                for key in usage:
+                    if not isinstance(key, str) or not key.endswith("_tokens"):
+                        continue
+                    metric = key[:-len("_tokens")]
+                    if not metric or f"{metric}_per_1m" in rates:
+                        continue
+                    metric_counts[(tier_name, key)] = (
+                        metric_counts.get((tier_name, key), 0) + 1)
+
+        def attempts(n: int) -> str:
+            return f" (in {n} attempt{'s' if n != 1 else ''})"
+
+        label = f"{project}/{job}"
+        for model in sorted(model_counts):
+            if "default" in table:
+                report["warnings"].append(
+                    f"{label}: usage model '{model}'"
+                    f"{attempts(model_counts[model])} is not in the price "
+                    "table — priced at the 'default' tier (pin a dedicated "
+                    "tier for accurate budgets)")
+            else:
+                report["warnings"].append(
+                    f"{label}: usage model '{model}'"
+                    f"{attempts(model_counts[model])} is not in the price "
+                    "table and there is no 'default' fallback — pricing "
+                    "this usage fails deterministically")
+        for tier_name, key in sorted(metric_counts):
+            metric = key[:-len("_tokens")]
+            report["warnings"].append(
+                f"{label}: usage metric {key}"
+                f"{attempts(metric_counts[(tier_name, key)])} has no price "
+                f"table entry ('{metric}_per_1m' missing in tier "
+                f"'{tier_name}') — the attempt fails at runtime")
 
     def _doctor_job(self, report: dict, proj_dir: Path, job_dir: Path, now: datetime) -> None:
         label = f"{proj_dir.name}/{job_dir.name}"
