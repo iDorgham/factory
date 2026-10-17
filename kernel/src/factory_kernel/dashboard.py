@@ -128,11 +128,23 @@ def _timeline(kernel, job) -> list[dict]:
     if reopened is not None and reopened in order:
         accepted = {s for s in accepted if order.get(s, -1) < order[reopened]}
 
+    events = _events(kernel, job)
     rounds: dict[str, int] = {}
-    for ev in _events(kernel, job):
+    guard_notes: dict[str, dict] = {}
+    for ev in events:
         if ev["type"] == "stage.attempt_started":
             sid = ev["data"].get("stage")
             rounds[sid] = max(rounds.get(sid, 0), ev["data"].get("attempt", 0))
+        elif ev["type"] in ("guard.violation", "guards.completed"):
+            # Latest guard verdict per stage, by attempt number: a later
+            # attempt supersedes what the earlier diff showed (spec §9.3).
+            data = ev["data"]
+            sid = data.get("stage")
+            note = {"attempt": data.get("attempt", 0),
+                    "violation": ev["type"] == "guard.violation", "data": data}
+            prev = guard_notes.get(sid)
+            if not prev or data.get("attempt", 0) >= prev["attempt"]:
+                guard_notes[sid] = note
 
     accepted_ids = [s["id"] for s in stages if s["id"] in accepted]
     if job.get("state") == "awaiting_human" and accepted_ids:
@@ -157,7 +169,44 @@ def _timeline(kernel, job) -> list[dict]:
             "id": sid, "phrase": phrase, "status": status,
             "round": round_no, "rounds": max_rounds,
         })
+    # Guard verdicts read as plain-language lines against the guarded stage
+    # (Solo promise, spec §10): what was flagged, where, or explicit "clean".
+    for sid, note in sorted(guard_notes.items(),
+                            key=lambda item: order.get(item[0], len(stages))):
+        if note["violation"]:
+            phrase, status = _guard_violation_phrase(note["data"]), "failed"
+        else:
+            phrase, status = "✓ Guards clean", "done"
+        timeline.append({
+            "id": f"{sid}:guards", "phrase": phrase, "status": status,
+            "round": None, "rounds": None,
+        })
     return timeline
+
+
+# Plain-language words per (guard, kind). Unknown kinds fall back to the raw
+# kind id, so a new guard is never rendered as an empty sentence.
+GUARD_KIND_WORDS = {
+    ("no_test_deletion", "deleted"): "deleted tests",
+    ("no_lockfile_surprise", "deleted"): "a deleted lockfile",
+    ("no_lockfile_surprise", "manifest_without_lockfile"):
+        "an unauthorized dependency change",
+    ("no_lockfile_surprise", "lockfile_without_manifest"):
+        "an unauthorized dependency change",
+    ("no_secret_in_diff", "secret"): "a secret",
+    ("guard_config", "unknown_guard"): "a broken guard configuration",
+    ("guard_config", "invalid_authorization"):
+        "a broken authorizations file",
+}
+
+
+def _guard_violation_phrase(data: dict) -> str:
+    what = GUARD_KIND_WORDS.get((data.get("guard"), data.get("kind")),
+                                data.get("kind") or "unwanted changes")
+    paths = data.get("paths") or []
+    if paths:
+        return f"⚠ Guard flagged {what} in {paths[0]}"
+    return f"⚠ Guard flagged {what}"
 
 
 def _needs_you(kernel, job) -> Optional[dict]:
@@ -587,6 +636,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   li.done { color:var(--ink); } li.done .dot { background:var(--good); border-color:var(--good); }
   li.active { color:var(--ink); font-weight:600; }
   li.active .dot { background:var(--accent); border-color:var(--accent); box-shadow:0 0 0 4px #7c9cff33; }
+  li.failed .dot { background:#d64545; border-color:#d64545; }
   .needs { border-color:var(--accent); }
   .pill { font-size:12px; padding:2px 9px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
   details summary { cursor:pointer; color:var(--muted); }
