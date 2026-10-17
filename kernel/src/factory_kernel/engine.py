@@ -24,6 +24,7 @@ from .gitrepo import collect_diff, head
 from .guards import GuardContext, GuardError, run_guards
 from .hashing import sha256_hex
 from .lease import LeaseManager
+from .risk import RiskError, assess, load_risk_config
 from .schemas import SchemaError
 from .ulid import new_ulid
 
@@ -245,7 +246,10 @@ class Engine:
                           "sha": sha},
                     job_id=job["id"],
                 )
-                return self._apply_gate(job, state, stage, fence)
+                return self._apply_gate(job, state, stage, attempt,
+                                        attempt_dir,
+                                        budget_doc.get("status") or "ok",
+                                        fence)
 
             # Failed/interrupted attempt: detect no-progress (spec §9.2).
             if prev_fingerprint is not None and fp == prev_fingerprint:
@@ -773,32 +777,140 @@ class Engine:
                 seen = data.get("fingerprint")
         return seen
 
-    def _apply_gate(self, job, state, stage, fence) -> str:
+    def _apply_gate(self, job, state, stage, attempt, attempt_dir,
+                    budget_status: str, fence) -> str:
+        """Evaluate the stage's gate over a *passed* attempt and decide.
+
+        Deterministic gates first (spec §5): ``risk_scored`` and
+        ``if_risk_above:*`` gates are decided by pure arithmetic
+        (``risk.assess``) over kernel-observed signals - guards, budget
+        verdict, checks, retries - recorded in a ``risk.computed`` event so
+        score -> band -> action all cite the same stored numbers. Gates that
+        don't consume risk keep their P0 semantics.
+        """
         sid = stage["id"]
-        decision = self._gate_decision(stage["gate"])
+        gate = stage["gate"]
+        verdict = None
+        if gate == "risk_scored" or gate.startswith("if_risk_above:"):
+            try:
+                decision, verdict = self._risk_gate(
+                    state, stage, attempt, attempt_dir, budget_status,
+                    gate, fence, job["id"],
+                )
+            except RiskError as e:
+                # A broken risk config must never degrade into a silently
+                # loosened gate: fail the attempt-to-accept boundary
+                # deterministically (same policy as an unpriced usage).
+                state.transition(
+                    "failed", actor=self.k.actor, fence=fence,
+                    reason=f"risk gate config error on stage '{sid}': {e}",
+                )
+                return "failed"
+        else:
+            decision = self._gate_decision(gate)
         state.append_event(
             "gate.evaluated", actor=self.k.actor, fence=fence,
-            data={"stage": sid, "gate": stage["gate"], "decision": decision},
+            data={"stage": sid, "gate": gate, "decision": decision},
             job_id=job["id"],
         )
         if decision == "require_human":
             state.transition("awaiting_human", actor=self.k.actor, fence=fence,
-                             reason=f"gate '{stage['gate']}' on stage '{sid}'")
+                             reason=f"gate '{gate}' on stage '{sid}'")
             return "awaiting_human"
+        if decision == "blocked":
+            score = verdict["score"]
+            band = verdict["band"]
+            state.transition(
+                "failed", actor=self.k.actor, fence=fence,
+                reason=f"risk gate '{gate}' on stage '{sid}' scored "
+                       f"{score} ({band}) - blocked pending operator rerun",
+            )
+            return "failed"
         return "accepted"
+
+    _IF_RISK_AUTO_BANDS = {
+        # "if_risk_above:L" keeps the stage automatic while the computed band
+        # does not rise above the named level; anything strictly above waits
+        # for a human. An unknown level falls to "medium" (the behavior the
+        # P0 placeholder encoded via thresholds.get(level, 40); profiles are
+        # kernel-owned, doctor (step 4) flags drift).
+        "low": ("low",),
+        "medium": ("low", "medium"),
+        "high": ("low", "medium", "high"),
+    }
+
+    def _risk_gate(self, state, stage, attempt, attempt_dir,
+                   budget_status: str, gate: str, fence, job_id: str) -> tuple[str, dict]:
+        """Score the stage's road-to-this-pass and resolve the gate decision.
+
+        Signals are stage-scoped, not attempt-scoped (see the docstring of
+        `_stage_signals` for why). The computed verdict lands in the event
+        log verbatim — `risk.computed` carries score, band, action and the
+        exact signals dict, so the decision is auditable end-to-end.
+        """
+        sid = stage["id"]
+        config = load_risk_config(
+            (self.k.factory_cfg or {}).get("risk_scoring"))
+        signals = self._stage_signals(state, sid, attempt, budget_status)
+        verdict = assess(signals, config)
+        state.append_event(
+            "risk.computed", actor=self.k.actor, fence=fence,
+            data={"stage": sid, **verdict, "signals": signals},
+            job_id=job_id,
+        )
+        if gate == "risk_scored":
+            decision = {"auto_advance": "auto",
+                        "awaiting_human": "require_human",
+                        "blocked": "blocked"}[verdict["action"]]
+            return decision, verdict
+        level = gate.split(":", 1)[1]
+        auto_bands = self._IF_RISK_AUTO_BANDS.get(
+            level, self._IF_RISK_AUTO_BANDS["medium"])
+        return ("auto" if verdict["band"] in auto_bands else "require_human",
+                verdict)
+
+    @staticmethod
+    def _stage_signals(state, sid: str, attempt: int, budget_status: str) -> dict:
+        """Kernel-built signals for the gate, stage-scoped (see _risk_gate).
+
+        The gate evaluates a *passed* attempt, so check/guard failures of
+        the winning attempt are impossible by definition - what is real is
+        the road that got here. Guard violations and check failures are
+        summed across the stage's recorded rounds (they made the stage
+        retry), the winning attempt number carries the retries, and the
+        caller passes the winning attempt's budget verdict (possible soft
+        breach - a soft breach notifies yet the attempt still stands, P2.2).
+        """
+        guard_violations = 0
+        check_failures = 0
+        for ev in state.load_events():
+            data = ev.get("data", {})
+            if data.get("stage") != sid:
+                continue
+            if ev["type"] == "guard.violation":
+                # One event per (guard, kind) group; 'violations' holds the
+                # full records - each individual violation counts.
+                guard_violations += len(data.get("violations") or [])
+            elif ev["type"] == "checks.completed":
+                # summarise() lists failed check *ids*; count them.
+                failed = data.get("failed") or []
+                check_failures += len(failed) if isinstance(failed, list) \
+                    else int(failed)
+        return {
+            "guard_violations": guard_violations,
+            "budget_status": budget_status,
+            "check_failures": check_failures,
+            "attempt_number": attempt,
+        }
 
     @staticmethod
     def _gate_decision(gate: str) -> str:
-        """Risk scoring arrives in P2; risk is treated as 0 for now."""
-        risk = 0.0
-        if gate == "none":
-            return "auto"
+        """Gates that do not consume risk: none -> auto, required -> human.
+
+        Risk gates ('risk_scored', 'if_risk_above:*') are decided by
+        `_risk_gate` over the computed band; this static method keeps only
+        the P0 cases (the old placeholder risk-0 effectively exits here).
+        """
         if gate == "required":
             return "require_human"
-        if gate == "risk_scored":
-            return "auto" if risk < 50 else "require_human"
-        if gate.startswith("if_risk_above:"):
-            thresholds = {"low": 10, "medium": 40, "high": 70}
-            level = gate.split(":", 1)[1]
-            return "require_human" if risk > thresholds.get(level, 40) else "auto"
         return "auto"

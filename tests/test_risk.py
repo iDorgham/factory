@@ -361,11 +361,10 @@ class TestEngineRiskGate:
         assert verify_gates and verify_gates[0]["data"]["decision"] == "auto"
 
     def test_config_lowered_thresholds_flip_the_gate_decision(
-            self, factory_root, kernel, demo_job):
+            self, factory_root):
         # A clean attempt still scores 0; with a `medium` ceiling of 1,
         # every score lands in the medium band and the risk gate must hold
         # the stage for a human instead of auto-advancing.
-        del kernel
         cfg = read_json(factory_root / "factory.json")
         cfg["risk_scoring"]["thresholds"] = {"low": 0, "medium": 1, "high": 100}
         (factory_root / "factory.json").write_text(
