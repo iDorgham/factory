@@ -1,0 +1,7 @@
+{
+  "id": "budget-burner",
+  "entrypoint": "run.py",
+  "capabilities": [],
+  "roles_supported": ["analyst", "planner", "builder", "verifier", "integrator"],
+  "description": "P2.2 budget test fixture: reports usage sized by FACTORY_BUDGET_INPUT_TOKENS on the build stage."
+}

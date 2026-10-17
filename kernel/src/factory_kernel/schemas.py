@@ -18,6 +18,8 @@ KINDS = {
     "project": "project.schema.json",
     "context.manifest": "context.manifest.schema.json",
     "authorizations": "authorizations.schema.json",
+    "budget": "budget.schema.json",
+    "price_table": "price_table.schema.json",
 }
 
 

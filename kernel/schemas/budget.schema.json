@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory.local/schemas/budget.schema.json",
+  "title": "Stage budget (P2.2)",
+  "description": "Canonical shape of a stage budget as declared in a stage profile (kernel/stages/*.yaml). Mapping to the enforcement vocabulary used by budgets.py, events, and budget.json: hard_limit = usd; soft_limit = soft_usd when present, else 0.8 x usd rounded to cents (a deterministic default so a stage without soft_usd still notifies near its ceiling instead of silently spending to the hard stop). tokens is the attempt context budget and minutes the adapter timeout - caps owned by the engine, not currency.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tokens", "usd", "minutes"],
+  "properties": {
+    "tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Attempt context-token budget (engine-side cap)."
+    },
+    "usd": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "hard_limit: hard budget ceiling in USD for the stage (cumulative across its attempts)."
+    },
+    "minutes": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Maximum adapter wall time for one attempt."
+    },
+    "soft_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "soft_limit: notify at this point in USD; must be less than usd (doctor checks soft < hard; the runtime never relaxes a limit)."
+    }
+  }
+}

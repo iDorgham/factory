@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory.local/schemas/price_table.schema.json",
+  "title": "Price table (P2.2)",
+  "description": "Rates per model tier from factory.json 'price_table' (spec section 15: the kernel converts reported usage to cost using this table). Keys are tier names (typically a model id, plus the required fallback 'default'); each tier prices exactly the three metered metrics per one million tokens. A table with only 'default' prices every model consistently; a strictly-typed tier pins one model's rates.",
+  "type": "object",
+  "minProperties": 1,
+  "additionalProperties": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["input_per_1m", "output_per_1m", "cached_per_1m"],
+    "properties": {
+      "input_per_1m": { "type": "number", "minimum": 0 },
+      "output_per_1m": { "type": "number", "minimum": 0 },
+      "cached_per_1m": { "type": "number", "minimum": 0 }
+    }
+  }
+}

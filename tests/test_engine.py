@@ -331,3 +331,82 @@ def test_doctor_rejects_invalid_authorization_document(kernel, demo_job):
     report = kernel.doctor()
     assert report["ok"] is False
     assert any("authorizations" in e for e in report["errors"])
+
+
+# ----------------------------------------------------------------------
+# P2.2: budgets and metering
+# ----------------------------------------------------------------------
+
+def _install_budget_burner(kernel):
+    """Copy the budget fixture adapter into the factory tree under test."""
+    import shutil
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    src = root / "tests" / "fixtures" / "adapters" / "budget-burner"
+    dst = kernel.adapters_dir / "budget-burner"
+    dst.mkdir(parents=True, exist_ok=True)
+    shutil.copy(src / "run.py", dst / "run.py")
+    shutil.copy(src / "manifest.json", dst / "manifest.json")
+
+
+def test_hard_budget_exceeded_fails_attempt_and_stops(demo_job, monkeypatch):
+    import json
+
+    kernel, job = demo_job
+    _install_budget_burner(kernel)
+    # build hard limit is $5.00; 2_000_000 input tokens at $3/1M = $6.00.
+    monkeypatch.setenv("FACTORY_BUDGET_INPUT_TOKENS", "2000000")
+
+    result = kernel.job_execute(job["id"], adapter_id="budget-burner")
+    # The hard stop is absolute: no retry rounds burn money past the ceiling.
+    assert result["state"] == "failed"
+
+    events = kernel._job_state(kernel._find_job_dir(job["id"])).load_events()
+    hard = [e for e in events if e["type"] == "budget.hard_exceeded"]
+    assert hard, [e["type"] for e in events]
+    assert hard[0]["data"]["stage"] == "build"
+    assert hard[0]["data"]["hard_limit"] == pytest.approx(5.00)
+    assert hard[0]["data"]["current_cost"] >= 5.00
+
+    # attempt-1 failed by budget, no attempt-2 exists
+    job_dir = kernel._find_job_dir(job["id"])
+    stages_dir = job_dir / "stages"
+    assert [d.name for d in sorted(stages_dir.iterdir()) if d.name.startswith("02-")] == [
+        "02-build"]
+    assert not (stages_dir / "02-build" / "attempt-2").exists()
+
+    budget = json.loads(
+        (stages_dir / "02-build" / "attempt-1" / "budget.json").read_text())
+    assert budget["status"] == "hard_exceeded"
+
+    finished = [e for e in events if e["type"] == "stage.attempt_finished"
+                and e["data"].get("stage") == "build"]
+    assert finished and all(e["data"]["status"] == "failed" for e in finished)
+
+
+def test_soft_budget_exceeded_notifies_but_continues(demo_job, monkeypatch):
+    import json
+
+    kernel, job = demo_job
+    _install_budget_burner(kernel)
+    # build: soft default 0.8 x $5.00 = $4.00, hard $5.00; 1_600_000 input
+    # tokens at $3/1M = $4.80 — between the two.
+    monkeypatch.setenv("FACTORY_BUDGET_INPUT_TOKENS", "1600000")
+
+    result = kernel.job_execute(job["id"], adapter_id="budget-burner")
+    assert result["state"] == "awaiting_human"  # ran on through approve gate
+
+    job_dir = kernel._find_job_dir(job["id"])
+    events = kernel._job_state(job_dir).load_events()
+    soft = [e for e in events if e["type"] == "budget.soft_exceeded"]
+    assert soft and soft[0]["data"]["stage"] == "build"
+    assert soft[0]["data"]["soft_limit"] == pytest.approx(4.00)
+    assert soft[0]["data"]["current_cost"] == pytest.approx(4.80)
+
+    budget = json.loads(
+        (job_dir / "stages" / "02-build" / "attempt-1" / "budget.json").read_text())
+    assert budget["status"] == "soft_exceeded"
+
+    accepted = [e["data"]["stage"] for e in events if e["type"] == "stage.accepted"]
+    assert "build" in accepted  # the attempt still completed its work

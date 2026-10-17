@@ -6,6 +6,36 @@ to a file under `kernel/schemas/` is recorded here with its migration.
 The schema files do not carry an explicit `version` field yet; this log is the
 interim record until schemas are versioned in their `$id` (planned for P1).
 
+## `budget.schema.json` / `price_table.schema.json`
+
+### 2026-10-17 — new file types (`P2.2 budgets and metering`)
+- **Change:** two new schemas. `budget.schema.json` validates a stage budget
+  object (`tokens`, `usd` = hard limit, `minutes`, optional `soft_usd` = soft
+  limit; unknown keys rejected). `price_table.schema.json` validates the
+  per-tier table in `factory.json` (`input_per_1m`/`output_per_1m`/
+  `cached_per_1m`, all `>= 0`, tiers are free-form names plus the required
+  fallback `default`).
+- **Reason:** budgets move from "declared" to "enforced" (P2 gap #4). The
+  kernel converts reported usage to cost with the price table, checks it
+  against the stage's soft/hard limits, and records `budget.json` per attempt
+  plus `budget.soft_exceeded` / `budget.hard_exceeded` events on breach.
+  Canonical key names stay `usd`/`soft_usd` because shipped profiles already
+  use them; the runtime vocabulary (`soft_limit`/`hard_limit`) is defined in
+  the schema descriptions, mapping documented there.
+- **Migration:** none required. `soft_usd` is optional; stages without it get
+  a deterministic soft limit of `0.8 x usd` (rounded to cents).
+
+## `event.schema.json`
+
+### 2026-10-17 — budget event semantics noted (`P2.2 budgets and metering`)
+- **Change:** no shape change. The enum values `budget.soft_exceeded` and
+  `budget.hard_exceeded` were pre-provisioned in P0; this entry records their
+  first producer (P2.2 budgets module) and consumer (engine attempt
+  lifecycle, doctor). No `budget.checked` event will be added: per-attempt
+  cost lives in the attempt's `budget.json` (events fire only on breach, per
+  the Solo three-element promise).
+- **Migration:** none.
+
 ## `authorizations.schema.json`
 
 ### 2026-10-17 — new file type (`P2.1 guards`)
