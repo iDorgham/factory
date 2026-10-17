@@ -78,6 +78,42 @@
           "description": "Declared ceilings for one attempt. Enforced by the per-stage 'minutes' timeout today; the rest is future."
         }
       }
+    },
+    "risk_scoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Same shape as risk.schema.json, which remains the authoritative schema for this section (P2.4). The band-to-action mapping is kernel-owned: configuration re-weights the score, it never decides what a band does. Absent: the kernel's documented defaults apply.",
+      "required": ["weights", "thresholds"],
+      "properties": {
+        "weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "guard_violation",
+            "budget_soft_exceeded",
+            "budget_hard_exceeded",
+            "check_failure",
+            "retry_attempt"
+          ],
+          "properties": {
+            "guard_violation": { "type": "integer", "minimum": 0 },
+            "budget_soft_exceeded": { "type": "integer", "minimum": 0 },
+            "budget_hard_exceeded": { "type": "integer", "minimum": 0 },
+            "check_failure": { "type": "integer", "minimum": 0 },
+            "retry_attempt": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["low", "medium", "high"],
+          "properties": {
+            "low": { "type": "integer", "minimum": 0 },
+            "medium": { "type": "integer", "minimum": 0 },
+            "high": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
     }
   }
 }

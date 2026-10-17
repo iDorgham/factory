@@ -23,6 +23,7 @@
         "guards.completed",
         "guard.violation",
         "gate.evaluated",
+        "risk.computed",
         "human.approval",
         "human.answer",
         "lease.acquired",

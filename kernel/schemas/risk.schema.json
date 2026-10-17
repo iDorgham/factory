@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory.local/schemas/risk.schema.json",
+  "title": "risk_scoring — deterministic risk-gate configuration (P2.4)",
+  "description": "Weights and band thresholds for the risk_scored gate. The score is pure arithmetic over kernel-observed signals (guards, budget verdict, checks, retries) — no model output plays any part in it. The kernel, not configuration, owns the band-to-action mapping (low -> auto_advance, medium -> awaiting_human, high -> blocked): tuning may re-weight what raises the score, never renegotiate what a band does. Absent at runtime, the kernel's documented defaults (equal to the shipped factory.json block) apply.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["weights", "thresholds"],
+  "properties": {
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Points one occurrence of each signal adds to the score. Output is clamped to the threshold cap, so sums can exceed it.",
+      "required": [
+        "guard_violation",
+        "budget_soft_exceeded",
+        "budget_hard_exceeded",
+        "check_failure",
+        "retry_attempt"
+      ],
+      "properties": {
+        "guard_violation": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per guard violation (kernel disqualification signal: an anti-cheating guard failed on the diff)."
+        },
+        "budget_soft_exceeded": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Added once when the attempt's budget verdict is soft_exceeded (work stands, limit proven leaky)."
+        },
+        "budget_hard_exceeded": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Added once when the attempt's budget verdict is hard_exceeded. Weights are operator-tunable, but the kernel asserts nothing here; a config that prices a hard breach at zero is legal by design — the hard stop itself is not tunable (it fails the attempt independently of the gate)."
+        },
+        "check_failure": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per failing check in the attempt's checks.json."
+        },
+        "retry_attempt": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per retry of the stage: attempt_number - 1. Struggle is evidence, not proof."
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["low", "medium", "high"],
+      "properties": {
+        "low": { "type": "integer", "minimum": 0 },
+        "medium": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 1 }
+      },
+      "description": "Band ceilings, not floors: score < low -> low, < medium -> medium, otherwise high. 'high' doubles as the score's clamp cap, so a 100 score saturates the highest band. The loader additionally enforces low < medium <= high (JSON Schema cannot express cross-key strict ordering)."
+    }
+  }
+}

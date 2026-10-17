@@ -20,6 +20,7 @@ KINDS = {
     "authorizations": "authorizations.schema.json",
     "budget": "budget.schema.json",
     "price_table": "price_table.schema.json",
+    "risk": "risk.schema.json",
     "factory": "factory.schema.json",
 }
 
