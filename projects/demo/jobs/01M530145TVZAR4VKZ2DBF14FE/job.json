@@ -1,19 +1,51 @@
 {
+  "approval": null,
   "brief": "Build a simple landing page with a hero and contact form",
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "attempt": 1,
+      "commit": "bb2c4b16a7c056a9c7c925480a4d630d16b36d11",
+      "sha": "43f1a5fc66c1bd0bc30fa4fd8dd54fd4e57cb6bd69b8390806be04fbf1a1443d",
+      "stage": "understand",
+      "ts": "2026-10-16T21:56:47.974612Z"
+    },
+    {
+      "attempt": 1,
+      "commit": "06558f7d57914e0d698c9ec7e49020d61947200b",
+      "sha": "cfae13f0a6c2b6062ec8a543779055abf01b0966e21568f96749210df0d70be0",
+      "stage": "plan",
+      "ts": "2026-10-16T21:56:50.341179Z"
+    },
+    {
+      "attempt": 1,
+      "commit": "ce8aba1740c781cdb7f21b880687dc1dcd20218c",
+      "sha": "ac61ea9e2fb81ccee73a50e6b694e3ebc18df81fb6096058ef02485167509427",
+      "stage": "build",
+      "ts": "2026-10-16T21:56:52.842814Z"
+    },
+    {
+      "attempt": 1,
+      "commit": "a2a24fa02ba1485d1a0e8a08f2b0a81f43cb40c2",
+      "sha": "2d6553ac8cc59cafcf7bdbc8ee5ebc0a1d2b0162e1c5f9a6cde18fd2a9e3108d",
+      "stage": "verify",
+      "ts": "2026-10-16T21:56:55.263757Z"
+    }
+  ],
   "cost_usd": 0.0,
   "created_at": "2026-10-16T18:36:45.807419Z",
-  "current_attempt": null,
-  "current_stage": null,
+  "current_attempt": 0,
+  "current_stage": "approve",
   "epic": null,
   "id": "01M530145TVZAR4VKZ2DBF14FE",
-  "last_event_id": "01M53015BFFVBWQG5Q310N0M79",
+  "last_event_id": "01M53BFVNGCNS3ZGFFEDBXDQG9",
   "lease": null,
+  "merge": null,
   "mode": "solo",
   "profile": "lite",
   "project": "demo",
+  "questions": [],
   "risk_score": 0.0,
-  "state": "pending",
+  "state": "failed",
   "tokens_used": 0,
-  "updated_at": "2026-10-16T18:36:45.807419Z"
+  "updated_at": "2026-10-16T21:57:01.744789Z"
 }

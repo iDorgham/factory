@@ -1,0 +1,7 @@
+{
+  "estimated": true,
+  "events": 7,
+  "input_tokens": 30,
+  "model": "echo-1",
+  "output_tokens": 60
+}

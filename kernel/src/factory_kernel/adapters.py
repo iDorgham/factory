@@ -63,7 +63,7 @@ class Adapter:
         return list(self.manifest.get("roles_supported", []))
 
     def run(self, request: dict, timeout: int = 600) -> RunResult:
-        entry = self.dir / self.manifest["entrypoint"]
+        entry = (self.dir / self.manifest["entrypoint"]).resolve()
         if not entry.exists():
             raise AdapterError(f"Adapter entrypoint missing: {entry}")
 
@@ -146,13 +146,21 @@ def select_adapter(
         return adapters[adapter_id]
 
     required = set(capabilities or [])
+    # Prefer echo when no explicit adapter_id is given (backward compatibility)
+    echo = adapters.get("echo")
+    if echo and required.issubset(set(echo.capabilities)):
+        if not role or not echo.roles_supported or role in echo.roles_supported:
+            return echo
     for adapter in adapters.values():
+        if adapter.id == "echo":
+            continue
         if not required.issubset(set(adapter.capabilities)):
             continue
         if role and adapter.roles_supported and role not in adapter.roles_supported:
             continue
         return adapter
-
+    if echo:
+        return echo
     if adapters:
         return next(iter(adapters.values()))
     raise AdapterError("No adapter available")

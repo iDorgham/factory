@@ -1,0 +1,38 @@
+#!/bin/sh
+# commit-msg hook — enforce provenance trailers (opt-in).
+#
+# Enable (once per clone):
+#     git config core.hooksPath .githooks
+# Disable:
+#     git config --unset core.hooksPath
+# Bypass a single commit:
+#     git commit --no-verify
+#
+# Requires AI-Tool and AI-Model trailers. See docs/development/CONTRIBUTING.md §3.1.
+
+msg_file="$1"
+
+# Skip commits that legitimately have no body: merges, reverts, and autosquash.
+if head -n1 "$msg_file" | grep -Eq '^(Merge|Revert|fixup!|squash!)'; then
+    exit 0
+fi
+
+missing=""
+grep -Eq '^AI-Tool: .+' "$msg_file"  || missing="$missing AI-Tool"
+grep -Eq '^AI-Model: .+' "$msg_file" || missing="$missing AI-Model"
+
+if [ -n "$missing" ]; then
+    echo "commit-msg: missing provenance trailer(s):$missing" >&2
+    echo "" >&2
+    echo "Add to the end of your commit message, e.g.:" >&2
+    echo "  AI-Tool: opencode" >&2
+    echo "  AI-Model: big-pickle" >&2
+    echo "  AI-Provider: opencode" >&2
+    echo "" >&2
+    echo "Use 'human' when no AI was involved." >&2
+    echo "See docs/development/CONTRIBUTING.md §3.1" >&2
+    echo "(bypass once with: git commit --no-verify)" >&2
+    exit 1
+fi
+
+exit 0

@@ -175,24 +175,128 @@ def _needs_you(kernel, job) -> Optional[dict]:
             "actions": [
                 {"id": "approve", "label": "Approve", "primary": True},
                 {"id": "change", "label": "Change this…", "primary": False},
+                {"id": "explain", "label": "Explain this", "primary": False},
             ],
             "feedback_label": "What should change?",
         }
     if state == "blocked":
+        open_q = [q for q in (job.get("questions") or []) if not q.get("answered")]
         return {
             "kind": "question", "job": job["id"], "title": "I need an answer",
             "body": "I paused because this is expensive to change later. "
-                    "Answer in the Details drawer, then resume.",
-            "sha": None, "actions": [], "feedback_label": None,
+                    "Answer below, then I resume.",
+            "sha": None,
+            "actions": [{"id": "explain", "label": "Explain this",
+                         "primary": False}],
+            "questions": [
+                {"id": q["id"], "text": q["text"], "options": q.get("options") or [],
+                 "stage": q.get("stage", "")}
+                for q in open_q
+            ],
+            "feedback_label": None,
         }
     if state == "stalled":
         return {
             "kind": "stalled", "job": job["id"], "title": "I'm stuck",
             "body": "Trying again isn't making progress, so I stopped rather than "
                     "waste your budget.",
-            "sha": None, "actions": [], "feedback_label": None,
+            "sha": None,
+            "actions": [{"id": "explain", "label": "Explain this",
+                         "primary": False}],
+            "feedback_label": None,
         }
     return None
+
+
+def _explain(kernel, job) -> list[str]:
+    """Deferred plain-language explanation ("Explain this" card action).
+
+    Honesty rule: every line is derived from kernel-visible state, the event
+    log, and the attempt artifacts on disk — never from agent self-report.
+    """
+    state = job.get("state")
+    lines: list[str] = []
+    brief = (job.get("brief") or "").strip() or "(no brief)"
+    lines.append(f"Goal: {brief}.")
+
+    timeline = _timeline(kernel, job)
+    done = [t["phrase"] for t in timeline if t["status"] == "done"]
+    active = next((t for t in timeline if t["status"] == "active"), None)
+    if done:
+        lines.append("Progress: " + " → ".join(done) + ".")
+    if active:
+        lines.append(f"Now at: {active['phrase']}.")
+
+    real_captures = 0
+    synth_captures = 0
+    for m in _visual_evidence(kernel._find_job_dir(job["id"])):
+        n = len(m.get("entries") or [])
+        if m.get("synthetic"):
+            synth_captures += n
+        else:
+            real_captures += n
+
+    if state == "awaiting_human":
+        checkpoints = job.get("checkpoints") or []
+        sha = (checkpoints[-1]["sha"][:12] + "…") if checkpoints else "?"
+        lines.append(
+            "All stages finished and every required check ran through the "
+            f"kernel (the agent cannot claim otherwise); the result is "
+            f"checkpoint {sha}, content-addressed so approval binds exactly "
+            "these bytes.")
+        if real_captures:
+            lines.append(
+                f"Evidence: {real_captures} real screenshot capture(s) in the "
+                "latest attempt outputs.")
+        if synth_captures:
+            lines.append(
+                f"(+{synth_captures} synthetic-fixture capture(s), labeled "
+                "and not evidence.)")
+        lines.append(
+            "Next: Approve keeps the work and merges it into your project; "
+            "'Change this…' tells me what to redo; Undo (after approval) "
+            "reverts the merge.")
+    elif state == "blocked":
+        questions = job.get("questions") or []
+        open_q = [q for q in questions if not q.get("answered")]
+        lines.append(
+            "I stopped because a decision is expensive to change later — "
+            "this is a blocking question, and the kernel parks the job so "
+            "nothing runs while it waits.")
+        if questions:
+            lines.append(
+                f"Budget: {len(questions)} of at most 3 blocking questions "
+                "for this job (a 4th would fail the job instead of asking "
+                "forever).")
+        for q in open_q:
+            lines.append(f"Open Q: {q['text']}")
+        lines.append("Next: answer here and I resume from the same spot.")
+    elif state == "stalled":
+        lines.append(
+            "The last attempts of this stage produced the identical failure "
+            "fingerprint, so further retries would only burn budget — "
+            "honest no-progress detection stopped the loop.")
+        lines.append(
+            "Next: cancel the job, or use 'Change this…' with new "
+            "instructions (it reopens the stage from your feedback).")
+    elif state == "completed":
+        lines.append(
+            "Approved and merged; the merge is recorded and reversible via "
+            "Undo while nothing else has advanced.")
+    elif state == "cancelled":
+        lines.append(
+            "Cancelled by you; the event log keeps an exact record of what "
+            "was done before the cancel.")
+    elif state == "failed":
+        lines.append(
+            "Failed: the last attempt broke a required check (or another "
+            "hard gate). The raw check output is in the attempt's "
+            "checks.json — a claim is not evidence, the log is.")
+    elif state == "running":
+        lines.append("The agent is working now; this view updates live.")
+    else:
+        lines.append(f"State: {state}.")
+    return lines
 
 
 def _preview(kernel, job) -> dict:
@@ -203,7 +307,52 @@ def _preview(kernel, job) -> dict:
         "available": bool(outputs),
         "worktree": str(worktree),
         "note": "No dev server in this slice — artifacts live under the job outputs.",
+        "visual": _visual_evidence(job_dir),
     }
+
+
+def _visual_evidence(job_dir) -> list[dict]:
+    """Collect `visual.json` manifests from attempt outputs (P1 visual contract).
+
+    Each manifest lists screenshot evidence entries produced by a
+    screenshot-capable adapter/command. Entries are surfaced as-is; manifests
+    marked `"synthetic": true` (test fixtures) are labeled so nobody mistakes
+    them for real captures. No manifest → empty list (not an error).
+    """
+    import json
+
+    found = []
+    for manifest_path in sorted((job_dir / "stages").glob("*/attempt-*/outputs/visual.json")):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        entries = manifest.get("entries") or []
+        if not isinstance(entries, list):
+            continue
+        rel = manifest_path.parent.relative_to(job_dir).as_posix()
+        kept = []
+        for e in entries[:20]:
+            if not isinstance(e, dict) or not e.get("file"):
+                continue
+            kept.append({
+                "viewport": str(e.get("viewport", "?")),
+                "theme": str(e.get("theme", "?")),
+                "file": str(e.get("file"))[:200],
+                **({"changed_pct": e["changed_pct"]}
+                   if isinstance(e.get("changed_pct"), (int, float)) else {}),
+            })
+        if kept:
+            try:
+                stage = manifest_path.parts[-4]
+            except IndexError:
+                stage = "?"
+            found.append({"stage": stage, "attempt_dir": rel,
+                          "synthetic": bool(manifest.get("synthetic", False)),
+                          "entries": kept})
+    return found
 
 
 def _sandbox(kernel) -> dict:
@@ -234,7 +383,7 @@ def build_view(kernel, project: Optional[str] = None) -> dict:
         "needs_you": None,
         "preview": None,
         "undo": {"available": False,
-                 "reason": "merge is not implemented yet (P1 worktree workstream)"},
+                 "reason": "no active job"},
         "sandbox": _sandbox(kernel),
         "empty_state": len(projects) == 0,
     }
@@ -280,12 +429,20 @@ def dispatch(kernel, body: dict) -> dict:
         if command == "approve":
             return {"ok": True, "job": kernel.job_approve(body["job_id"], sha=body.get("sha"))}
         if command == "change":
-            return {"ok": True,
-                    "job": kernel.job_request_changes(body["job_id"], body.get("feedback", ""))}
+            return {"ok": True, "job": kernel.job_request_changes(
+                body["job_id"], body.get("feedback", ""),
+                adapter_id=body.get("adapter"))}
         if command == "cancel":
             return {"ok": True, "job": kernel.job_cancel(body["job_id"])}
+        if command == "answer":
+            return {"ok": True, "job": kernel.job_answer(
+                body["job_id"], body["question_id"], body.get("answer", ""),
+                adapter_id=body.get("adapter"))}
         if command == "undo":
             return {"ok": True, "job": kernel.job_undo(body["job_id"])}
+        if command == "explain":
+            job = kernel.job_status(body["job_id"])
+            return {"ok": True, "explanation": _explain(kernel, job)}
         return {"ok": False, "error": f"unknown command '{command}'"}
     except Exception as e:  # report, never crash the server
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -471,6 +628,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="muted" id="tl-title">Progress</div>
     <ol class="timeline" id="timeline"></ol>
     <div class="row" id="preview-row" style="margin-top:6px"></div>
+    <div class="row" id="visual-row" style="margin-top:6px"></div>
   </div>
 
   <div class="card needs" id="needs-card" style="display:none">
@@ -481,6 +639,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <p id="needs-body"></p>
     <div class="muted" id="needs-sha"></div>
     <div class="row" id="needs-actions" style="margin-top:10px"></div>
+    <div class="muted" id="explain-box" style="display:none;margin-top:10px;white-space:pre-wrap"></div>
     <textarea id="feedback" placeholder="What should change?" style="display:none;margin-top:10px"></textarea>
   </div>
 
@@ -528,6 +687,20 @@ function render(v) {
     $("preview-row").innerHTML = pv.available
       ? `<span class="pill">preview ready</span><span class="muted">${esc(pv.note)}</span>`
       : "";
+    const vv = $("visual-row");
+    if (vv) {
+      const vis = pv.visual || [];
+      vv.innerHTML = vis.map(m =>
+        `<div class="muted" style="margin-top:6px">${esc(m.stage)}` +
+        (m.synthetic ? ` <span class="pill">synthetic fixture — not a real screenshot</span>` : "") +
+        `<ul>` + m.entries.map(e =>
+          `<li>${esc(e.viewport)} · ${esc(e.theme)} · ${esc(e.file)}` +
+          (typeof e.changed_pct === "number"
+            ? ` · <b>changed ${e.changed_pct}%</b>` : "") +
+          `</li>`).join("") +
+        `</ul></div>`
+      ).join("");
+    }
   } else {
     tl.style.display = "none";
   }
@@ -541,6 +714,7 @@ function render(v) {
     $("needs-body").textContent = n.body;
     $("needs-sha").textContent = n.sha ? ("checkpoint " + n.sha.slice(0, 12) + "…") : "";
     $("needs-actions").innerHTML = "";
+    $("explain-box").style.display = "none";
     (n.actions || []).forEach(a => {
       const b = document.createElement("button");
       b.textContent = a.label;
@@ -548,6 +722,37 @@ function render(v) {
       b.onclick = () => onAction(a.id, n.job);
       $("needs-actions").appendChild(b);
     });
+    if (n.kind === "question") {
+      (n.questions || []).forEach(q => {
+        const wrap = document.createElement("div");
+        wrap.style.marginTop = "10px";
+        const qt = document.createElement("div");
+        qt.innerHTML = "<b>Q:</b> ";
+        qt.appendChild(document.createTextNode(q.text));
+        wrap.appendChild(qt);
+        const opts = document.createElement("div");
+        opts.style.marginTop = "6px";
+        (q.options || []).forEach(o => {
+          const b = document.createElement("button");
+          b.className = "secondary";
+          b.textContent = o;
+          b.onclick = () => send({command: "answer", job_id: n.job,
+                                  question_id: q.id, answer: o});
+          opts.appendChild(b);
+        });
+        const box = document.createElement("input");
+        box.placeholder = "Or type your answer…";
+        box.style.marginTop = "6px";
+        box.onkeydown = (e) => {
+          if (e.key === "Enter" && box.value.trim())
+            send({command: "answer", job_id: n.job,
+                  question_id: q.id, answer: box.value.trim()});
+        };
+        wrap.appendChild(opts);
+        wrap.appendChild(box);
+        $("needs-actions").appendChild(wrap);
+      });
+    }
     $("feedback").style.display = "none";
   } else {
     card.style.display = "none";
@@ -559,7 +764,7 @@ function render(v) {
   ).join("");
 }
 
-async function send(payload) {
+async function send(payload, then) {
   $("err").textContent = "";
   if (!LIVE) { $("err").textContent = "Read-only export — run `factory serve` to act."; return; }
   try {
@@ -569,6 +774,7 @@ async function send(payload) {
     });
     const out = await r.json();
     if (!out.ok) $("err").textContent = out.error || "action failed";
+    else if (then) then(out);
     refresh();
   } catch (e) { $("err").textContent = String(e); }
 }
@@ -580,6 +786,15 @@ function onAction(id, jobId) {
     const box = $("feedback");
     if (box.style.display === "none") { box.style.display = "block"; box.focus(); return; }
     return send({command: "change", job_id: jobId, feedback: box.value});
+  }
+  if (id === "explain") {
+    const box = $("explain-box");
+    if (box.style.display === "block") { box.style.display = "none"; return; }
+    if (!LIVE) { box.textContent = "Read-only export — run `factory serve` to act."; box.style.display = "block"; return; }
+    return send({command: "explain", job_id: jobId}, (out) => {
+      box.textContent = (out.explanation || []).join("\n");
+      box.style.display = "block";
+    });
   }
 }
 

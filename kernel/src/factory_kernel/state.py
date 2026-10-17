@@ -100,6 +100,7 @@ class JobState:
             "checkpoints": [],
             "approval": None,
             "merge": None,
+            "questions": [],
             "last_event_id": first["id"],
         }
 
@@ -150,6 +151,23 @@ class JobState:
                         "decision": d.get("decision"),
                         "feedback": d.get("feedback"),
                     }
+            elif t == "job.question_asked":
+                snap["questions"].append({
+                    "id": d.get("id", ""),
+                    "text": d.get("text", ""),
+                    "kind": d.get("kind", "blocking"),
+                    "options": list(d.get("options") or []),
+                    "stage": d.get("stage", ""),
+                    "attempt": d.get("attempt", 0),
+                    "ts": ev["ts"],
+                    "answered": False,
+                })
+            elif t == "human.answer":
+                for q in snap["questions"]:
+                    if q["id"] == d.get("question_id"):
+                        q["answered"] = True
+                        q["answer"] = d.get("answer", "")
+                        break
             elif t in ("job.completed", "job.failed", "job.cancelled"):
                 snap["state"] = t.split(".")[1]
             elif t == "job.archived":

@@ -16,3 +16,13 @@ state/index.json
 
 # Factory-managed project repositories (nested git repos under projects/)
 projects/*/repo/
+
+# Runtime projects are ephemeral machine state, not source. The `demo`
+# project is kept tracked as deliberate bug evidence (see docs/context).
+projects/*
+!projects/demo/
+
+# Runtime project jobs are ephemeral machine state, not source. The `demo`
+# project is kept tracked as deliberate bug evidence (see docs/context).
+projects/*/jobs/
+!projects/demo/jobs/

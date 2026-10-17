@@ -201,7 +201,7 @@ def test_attempt_input_hash_reuse(demo_job):
     attempt_dir = kernel._find_job_dir(job["id"]) / "stages" / "00-understand" / "attempt-1"
     checks = load_checks(project_dir)
 
-    first, _ = engine._run_attempt(
+    first, _, _nq = engine._run_attempt(
         job, kernel._find_job_dir(job["id"]), state, stage, 1, attempt_dir, project_dir,
         worktree, None, adapters, checks, fence, 600,
     )
@@ -209,7 +209,7 @@ def test_attempt_input_hash_reuse(demo_job):
     brief = attempt_dir / "outputs" / "brief.md"
     mtime = brief.stat().st_mtime_ns
 
-    second, _ = engine._run_attempt(
+    second, _, _nq = engine._run_attempt(
         job, kernel._find_job_dir(job["id"]), state, stage, 1, attempt_dir, project_dir,
         worktree, None, adapters, checks, fence, 600,
     )

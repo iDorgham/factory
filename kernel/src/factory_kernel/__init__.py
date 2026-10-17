@@ -10,6 +10,16 @@ from .adapters import Adapter, AdapterError, RunResult, discover_adapters
 from .checkpoint import result_hash, tree_hash
 from .conformance import CaseResult, overall_ok, run_suite
 from .dashboard import build_view, export_dashboard, render_html
+from .provenance import (
+    DEFAULT_REQUIRED,
+    Commit,
+    ProvenanceError,
+    Violation,
+    check_commits,
+    parse_trailers,
+    read_commits,
+    verify,
+)
 
 __all__ = [
     "Kernel",
@@ -42,5 +52,13 @@ __all__ = [
     "build_view",
     "export_dashboard",
     "render_html",
+    "DEFAULT_REQUIRED",
+    "Commit",
+    "ProvenanceError",
+    "Violation",
+    "check_commits",
+    "parse_trailers",
+    "read_commits",
+    "verify",
 ]
 __version__ = "0.4.0"

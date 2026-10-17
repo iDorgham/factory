@@ -22,6 +22,10 @@ from .ulid import new_ulid
 # Maximum time the engine will wait for one adapter run, regardless of budget.
 ADAPTER_TIMEOUT_CAP = 3600
 
+# Solo question budget (P1): at most this many blocking questions per job.
+# The next blocking question parks the job as `blocked` until a human answers.
+MAX_BLOCKING_QUESTIONS = 3
+
 
 class EngineError(Exception):
     pass
@@ -43,6 +47,11 @@ def input_hash(manifest: dict, adapter_id: Optional[str]) -> str:
         "summaries": manifest.get("summaries", {}),
     }
     return sha256_hex(json.dumps(core, sort_keys=True, separators=(",", ":")))
+
+
+def _normalize_question(text: str) -> str:
+    """Normalized question text for repeat detection (case/space-insensitive)."""
+    return " ".join(str(text or "").lower().split())
 
 
 class Engine:
@@ -187,10 +196,23 @@ class Engine:
 
         for attempt in range(start, stage["max_rounds"] + 1):
             attempt_dir = base / f"attempt-{attempt}"
-            status, fp = self._run_attempt(
+            status, fp, new_blocking = self._run_attempt(
                 job, job_dir, state, stage, attempt, attempt_dir, project_dir, worktree,
                 adapter_id, adapters, checks_cfg, fence, check_timeout, reset=reset,
             )
+            # A new blocking question parks the job before any accept: the
+            # stage re-runs with the human's answer in context. Past the
+            # per-job budget the job fails instead of interrogating forever.
+            if new_blocking:
+                total = self._blocking_question_count(state)
+                if total > MAX_BLOCKING_QUESTIONS:
+                    state.transition("failed", actor=self.k.actor, fence=fence,
+                                     reason="blocking question budget exhausted "
+                                            f"({MAX_BLOCKING_QUESTIONS} per job)")
+                    return "failed"
+                state.transition("blocked", actor=self.k.actor, fence=fence,
+                                 reason="blocking question needs a human answer")
+                return "blocked"
             if status == "passed":
                 sha = record_checkpoint(
                     state, attempt_dir, job_dir, worktree, sid, attempt,
@@ -240,7 +262,7 @@ class Engine:
         key = input_hash(manifest, adapter.id)
         atomic_write_json(attempt_dir / "input.json", {"input_hash": key})
 
-        # Idempotency: identical inputs that already produced an accepted result
+        # Idempotent start: identical inputs that already produced an accepted result
         # are reused rather than re-run. A human-requested redo opts out.
         previous = read_json(attempt_dir / "result.json")
         if (not reset and previous and previous.get("input_hash") == key
@@ -252,17 +274,30 @@ class Engine:
                       "reused": True},
                 job_id=job["id"],
             )
-            return "passed", previous.get("fingerprint")
+            return "passed", previous.get("fingerprint"), 0
 
         run = self._invoke_adapter(
             adapter, job, stage, attempt, attempt_dir, worktree, manifest, fence
         )
+        # Adapter questions are durable first-class events: they survive
+        # resume, count against the per-job budget, and surface on the
+        # dashboard question card (P1 Solo question budget).
+        new_blocking = self._record_questions(
+            job, job_dir, state, stage, attempt, run.questions,
+            fence, actor=f"adapter/{adapter.id}")
         usage = {k: v for k, v in run.usage.items() if k != "type"}
         usage["events"] = len(run.events)
         atomic_write_json(attempt_dir / "usage.json", usage)
 
         missing = self._missing_outputs(stage, attempt_dir)
-        results = run_checks(checks_cfg, stage["checks"], worktree, timeout=check_timeout)
+        # Checks (e.g. visual capture) learn where this attempt's outputs
+        # live via env paths, absolute so tools run from anywhere.
+        checks_env = {
+            "FACTORY_ATTEMPT_DIR": str(attempt_dir.absolute()),
+            "FACTORY_VISUAL_OUT": str((attempt_dir / "outputs").absolute()),
+        }
+        results = run_checks(checks_cfg, stage["checks"], worktree,
+                             timeout=check_timeout, extra_env=checks_env)
         summary = summarise(results)
         atomic_write_json(attempt_dir / "checks.json", {
             "results": [r.to_dict() for r in results],
@@ -297,7 +332,7 @@ class Engine:
                   "adapter_error": run.error},
             job_id=job["id"],
         )
-        return status, fp
+        return status, fp, new_blocking
 
     # ------------------------------------------------------------------
     # Helpers
@@ -335,6 +370,62 @@ class Engine:
             if not (attempt_dir / "outputs" / name).exists():
                 missing.append(name)
         return missing
+
+    def _record_questions(self, job, job_dir, state, stage, attempt,
+                          questions, fence, actor="kernel") -> int:
+        """Persist adapter questions as `job.question_asked` events.
+
+        Returns the number of newly recorded *blocking* questions. Repeats
+        (same id or same normalized text as an already-recorded question) are
+        not recorded twice, so a stuck agent cannot burn the per-job budget by
+        re-asking. Malformed questions without text are ignored. Asked
+        questions are also appended to `questions.md` so they (and later
+        answers) reach future attempts through the context manifest.
+        """
+        asked: list[tuple[str, str]] = [
+            (str(ev["data"].get("id") or ""),
+             _normalize_question(str(ev["data"].get("text") or "")))
+            for ev in state.load_events()
+            if ev["type"] == "job.question_asked"
+        ]
+        lines = []
+        new_blocking = 0
+        for index, q in enumerate(questions or []):
+            text = str(q.get("text") or q.get("message") or "").strip()[:2000]
+            if not text:
+                continue
+            qid = str(q.get("id") or f"{stage['id']}-{attempt}-{index + 1}")
+            norm = _normalize_question(text)
+            if any(eid == qid or (enorm and enorm == norm) for eid, enorm in asked):
+                continue
+            kind = str(q.get("kind") or "blocking")
+            options = [str(o)[:500] for o in (q.get("options") or [])][:8]
+            state.append_event(
+                "job.question_asked", actor=actor, fence=fence,
+                data={"id": qid, "text": text, "kind": kind, "options": options,
+                      "stage": stage["id"], "attempt": attempt},
+                job_id=job["id"],
+            )
+            asked.append((qid, norm))
+            if kind == "blocking":
+                new_blocking += 1
+            lines.append(f"## Q: {qid} (stage {stage['id']}, attempt {attempt}, {kind})\n"
+                         f"{text}\n" +
+                         (f"Options: {' | '.join(options)}\n" if options else ""))
+        if lines:
+            path = job_dir / "questions.md"
+            previous = path.read_text(encoding="utf-8") if path.exists() else ""
+            path.write_text(previous + "".join(lines), encoding="utf-8")
+        return new_blocking
+
+    @staticmethod
+    def _blocking_question_count(state) -> int:
+        """Blocking `job.question_asked` events recorded for this job."""
+        return sum(
+            1 for ev in state.load_events()
+            if ev["type"] == "job.question_asked"
+            and ev["data"].get("kind", "blocking") == "blocking"
+        )
 
     @staticmethod
     def _restore_worktree(state, worktree) -> None:

@@ -8,6 +8,15 @@ interim record until schemas are versioned in their `$id` (planned for P1).
 
 ## `job.schema.json`
 
+### 2026-10-16 — blocking-question ledger (`questions`)
+- **Change:** added an optional `questions` array; each item carries `id`,
+  `text`, `kind`, `options`, `stage`, `attempt`, `ts`, `answered`, `answer`.
+- **Reason:** the Solo question budget (P1): the engine records adapter
+  `question` events as `job.question_asked`, the fold surfaces them for the
+  dashboard question card, and `human.answer` marks them answered.
+- **Migration:** none required. The fold always emits `questions` (empty for
+  older jobs), and the field is optional.
+
 ### 2026-10-16 — git checkpoints (`commit`) and the merge record (`merge`)
 - **Change:** added `commit` (`["string", "null"]`) to each `checkpoints` item,
   and a new `merge` property (`["object", "null"]`) with `event`, `branch`,
@@ -49,6 +58,13 @@ interim record until schemas are versioned in their `$id` (planned for P1).
   renamed, no stored file rewritten.
 
 ## `event.schema.json`
+
+### 2026-10-16 — blocking-question event
+- **Change:** added `job.question_asked` to the event-type enum.
+- **Reason:** the Solo question budget (P1): the engine records each adapter
+  `question` event durably so questions survive resume, count against the
+  per-job budget, and fold into the dashboard question card.
+- **Migration:** none required; the enum only widens.
 
 ### 2026-10-16 — merge-queue events
 - **Change:** added `merge.completed`, `merge.conflict`, and `merge.undone` to

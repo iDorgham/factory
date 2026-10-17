@@ -1,6 +1,6 @@
 # Enterprise AI Software Factory — Architecture (Built from Scratch)
 
-**Version:** 3.0 (P1 Solo slice — in progress)  
+**Version:** 3.0 (P1 Solo slice complete — question budget + real visual capture landed; all changes uncommitted)  
 **Status:** Runnable reference implementation of the specification
 
 > Files are the protocol. Events are the truth. A small kernel enforces. Agents only propose.
@@ -41,9 +41,9 @@ This directory is a complete, working skeleton of the factory architecture descr
 | Stage profile loader + validation (lite/standard) | ✅ | `kernel/src/factory_kernel/profiles.py` |
 | JSON Schema validation on every kernel write | ✅ | `kernel/src/factory_kernel/schemas.py` |
 | Cross-platform atomic writes (Windows-safe) | ✅ | `kernel/src/factory_kernel/atomic.py` |
-| Test suite (180 pytest cases) | ✅ | `tests/` |
-| Role definitions (8 → 5 starter) | ✅ | `roles/` |
-| Echo adapter stub | ✅ | `adapters/echo/` |
+| Test suite (214 pytest cases: 212 passed, 2 skipped) | ✅ | `tests/` |
+| Role definitions (5 starter) | ✅ | `roles/` |
+| Echo adapter (deterministic) + live CLI-agent backend (`resume`, recorded conformance) | ✅ | `adapters/echo/`, `adapters/cli-agent/` |
 | `factory doctor` (chain check, leases, repair) + `reindex` | ✅ | Implemented |
 | Git worktree isolation (branch `factory/<job-id>`) | ✅ | `projects/<name>/repo` + `.work/<job-id>/` |
 | Derived state index | ✅ | `state/index.json` |
@@ -154,7 +154,7 @@ Clients (CLI / dashboard)
 
 ## Next phases (from the specification roadmap)
 
-- **P1 Solo slice** (in progress) — lite-profile execution through the stage-graph engine ✅, adapter runtime + echo adapter ✅, adapter conformance suite (§20.3) ✅, build loop with no-progress detection ✅, content-addressed checkpoints + SHA-bound approval ✅, `interrupted` attempt recovery + input-hash idempotency ✅, Solo dashboard (`factory serve` live + `export-dashboard` static, with Approve / Change this… from the card) ✅, factory-managed git worktrees + checkpoint commits + merge queue + Undo ✅; still to come: a real coding-agent adapter.
+- **P1 Solo slice** (✅ complete in code) — lite-profile execution through the stage-graph engine ✅, adapter runtime + echo + live cli-agent backend ✅, adapter conformance suite (§20.3) ✅, build loop with no-progress detection ✅, content-addressed checkpoints + SHA-bound approval ✅, `interrupted` attempt recovery + input-hash idempotency ✅, Solo dashboard (`factory serve` live + `export-dashboard` static, with Approve / Change this… / Undo from the card) ✅, factory-managed git worktrees + checkpoint commits + merge queue + Undo ✅, Solo question budget (≤ 3 blocking questions, durable `job.question_asked` events, one-click answers from the dashboard) ✅, real visual capture (`visual.json` evidence produced by headless Edge/Chrome, bound to the checkpoint SHA, rendered in the dashboard) ✅.
 - **P2 Trust layer** — budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline.
 - **P3 Team** — concurrent jobs, merge queue, RBAC, audit chain.
 - **P4 Enterprise** — brands, design-system checks, compliance export, change windows.
@@ -183,10 +183,10 @@ Install the dev dependencies and run the suite:
 
 ```bash
 pip install -e ".[dev]"     # or: pip install pytest pyyaml jsonschema flake8
-python -m pytest            # 180 tests: atomic, ulid, hashing, lease, state,
+python -m pytest            # 214 tests (212 passed, 2 skipped): atomic, ulid, hashing, lease, state,
                             #   transitions, profiles, schemas, kernel, doctor,
                             #   engine, checks, context, adapters, checkpoint,
-                            #   conformance, dashboard, gitrepo/worktree/merge
+                            #   conformance, dashboard, worktree (git/merge/undo), provenance
 python -m flake8 kernel/src tests adapters   # lint (config in .flake8)
 ```
 

@@ -1,0 +1,12 @@
+{
+  "id": "cli-agent",
+  "name": "Generic CLI Agent Adapter",
+  "version": "0.1.0",
+  "description": "Generic adapter that shells out to a configurable CLI agent; defaults to a deterministic no-op for tests.",
+  "capabilities": ["text", "resume"],
+  "models": ["cli-agent-1"],
+  "entrypoint": "run.py",
+  "config": {
+    "command_env": "FACTORY_CLI_AGENT_CMD"
+  }
+}

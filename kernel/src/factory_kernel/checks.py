@@ -12,6 +12,7 @@ Conditional checks are not treated as required in this reference slice.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -77,6 +78,7 @@ def run_one(
     spec: dict,
     worktree: Union[str, Path],
     timeout: int = 600,
+    extra_env: Optional[dict] = None,
 ) -> CheckResult:
     cmd = spec.get("cmd", "")
     required = _is_required(spec.get("required"))
@@ -90,6 +92,7 @@ def run_one(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env={**os.environ, **(extra_env or {})},
         )
         exit_code: Optional[int] = proc.returncode
         output = (proc.stdout or "") + (proc.stderr or "")
@@ -114,13 +117,17 @@ def _run_required_checks(
     checks: dict,
     worktree: Union[str, Path],
     timeout: int,
+    extra_env: Optional[dict] = None,
 ) -> CheckResult:
     """The ``required_checks`` meta-check passes iff every required check passes."""
     required_ids = [
         cid for cid, spec in checks.items()
         if cid != "required_checks" and spec.get("required") is True
     ]
-    inner = [run_one(cid, checks[cid], worktree, timeout) for cid in required_ids]
+    inner = [
+        run_one(cid, checks[cid], worktree, timeout, extra_env=extra_env)
+        for cid in required_ids
+    ]
     failed = [r.id for r in inner if not r.passed]
     return CheckResult(
         id="required_checks",
@@ -138,12 +145,15 @@ def run_checks(
     ids: list[str],
     worktree: Union[str, Path],
     timeout: int = 600,
+    extra_env: Optional[dict] = None,
 ) -> list[CheckResult]:
     """Run the named checks. A declared-but-undefined check is a failure."""
     results: list[CheckResult] = []
     for check_id in ids:
         if check_id == "required_checks":
-            results.append(_run_required_checks(checks, worktree, timeout))
+            results.append(
+                _run_required_checks(checks, worktree, timeout,
+                                     extra_env=extra_env))
             continue
         spec = checks.get(check_id)
         if spec is None:
@@ -159,7 +169,8 @@ def run_checks(
                 )
             )
             continue
-        results.append(run_one(check_id, spec, worktree, timeout))
+        results.append(
+            run_one(check_id, spec, worktree, timeout, extra_env=extra_env))
     return results
 
 

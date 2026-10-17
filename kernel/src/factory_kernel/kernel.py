@@ -117,12 +117,22 @@ class Kernel:
             "unit": {"cmd": "echo 'unit tests placeholder'", "required": True},
             "build": {"cmd": "echo 'build placeholder'", "required": True},
             "a11y": {"cmd": "echo 'a11y placeholder'", "required": False},
-            "visual": {"cmd": "echo 'visual placeholder'", "required": False},
+            "visual": {"cmd": self._visual_check_cmd(), "required": False},
         }
         atomic_write_json(proj_dir / "checks.json", checks)
 
         self._reindex()
         return project
+
+    def _visual_check_cmd(self) -> str:
+        """The `visual` check command: the real screenshot producer (§7).
+
+        The capture runs with `cwd` = job worktree and takes the attempt
+        outputs dir from `FACTORY_VISUAL_OUT` (exported by the engine).
+        Missing page → the manifest records `skipped`, exit 0.
+        """
+        capture = self.adapters_dir / "visual-capture" / "capture.py"
+        return f'python "{capture}" --url index.html --diff-previous'
 
     def project_list(self) -> list[dict]:
         projects = []
@@ -377,7 +387,8 @@ class Kernel:
 
         return read_jsonl(Path(job_dir) / "events.jsonl")
 
-    def job_request_changes(self, job_id: str, feedback: str, stage: Optional[str] = None) -> dict:
+    def job_request_changes(self, job_id: str, feedback: str, stage: Optional[str] = None,
+                            adapter_id: Optional[str] = None) -> dict:
         """Send feedback from the approval card: re-open the last stage and redo it."""
         job = self.job_status(job_id)
         if job["state"] not in ("awaiting_human", "blocked"):
@@ -399,7 +410,49 @@ class Kernel:
         finally:
             if lease.current_token() == fence:
                 lease.release(fence)
-        return self.job_execute(job_id)
+        return self.job_execute(job_id, adapter_id=adapter_id)
+
+    def job_answer(self, job_id: str, question_id: str, answer: str,
+                   adapter_id: Optional[str] = None) -> dict:
+        """Answer an open blocking question and resume the job.
+
+        Records `human.answer`, appends the answer to `questions.md` (so the
+        next attempt sees it in its context manifest), and resumes execution.
+        Pass the same `adapter_id` the job ran with — the kernel does not
+        assume the default adapter on resume.
+        """
+        job = self.job_status(job_id)
+        if job["state"] != "blocked":
+            raise KernelError(f"Job is '{job['state']}'; nothing to answer")
+        open_q = [q for q in job.get("questions", [])
+                  if q["id"] == question_id and not q.get("answered")]
+        if not open_q:
+            raise KernelError(f"No open question '{question_id}' on job '{job_id}'")
+        if not (answer or "").strip():
+            raise KernelError("Answer must not be empty")
+
+        job_dir = self._find_job_dir(job_id)
+        lease = LeaseManager(job_dir, self.actor)
+        fence = lease.acquire()
+        try:
+            state = self._job_state(job_dir)
+            state.append_event(
+                "human.answer", actor=self.actor, fence=fence,
+                data={"question_id": question_id, "answer": answer.strip()[:2000]},
+                job_id=job_id,
+            )
+            path = job_dir / "questions.md"
+            previous = path.read_text(encoding="utf-8") if path.exists() else ""
+            path.write_text(
+                previous + f"### A: {question_id}\n{answer.strip()[:2000]}\n",
+                encoding="utf-8",
+            )
+            state.transition("running", actor=self.actor, fence=fence,
+                             reason=f"human answered '{question_id}'")
+        finally:
+            if lease.current_token() == fence:
+                lease.release(fence)
+        return self.job_execute(job_id, adapter_id=adapter_id)
 
     def _last_accepted_stage(self, job_dir: Path) -> Optional[str]:
         stage = None

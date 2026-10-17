@@ -1,0 +1,15 @@
+# <type>: <imperative subject, <= 72 chars>
+#
+# Why (not what — the diff shows what):
+#
+# Refs: plans/<phase>.md §<n>
+#
+# --- Provenance trailers (REQUIRED) -----------------------------------------
+# Uncomment and fill in the tool/model that produced this commit.
+# Use "human" when no AI was involved. See docs/development/CONTRIBUTING.md §3.1
+#
+# AI-Tool: opencode
+# AI-Model: big-pickle
+# AI-Provider: opencode
+# AI-Session: ses_...
+# Co-authored-by: Name <email>

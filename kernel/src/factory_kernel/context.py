@@ -93,6 +93,12 @@ def collect_stage_context(
     if brief.exists():
         files.append(file_entry("brief.md", "required", _read(brief)))
 
+    # Answered (and open) blocking questions travel with every attempt so a
+    # resumed stage sees the human's answers, not just the original brief.
+    questions = job_dir / "questions.md"
+    if questions.exists():
+        files.append(file_entry("questions.md", "context", _read(questions)))
+
     for req in stage.get("requires", []):
         found = _resolve_required(job_dir, req)
         if found is not None:

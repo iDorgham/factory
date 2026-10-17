@@ -66,6 +66,23 @@
         "ts": { "type": "string" }
       }
     },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "kind": { "type": "string" },
+          "options": { "type": "array", "items": { "type": "string" } },
+          "stage": { "type": "string" },
+          "attempt": { "type": "integer" },
+          "ts": { "type": "string", "format": "date-time" },
+          "answered": { "type": "boolean" },
+          "answer": { "type": "string" }
+        }
+      }
+    },
     "last_event_id": { "type": "string" }
   },
   "additionalProperties": false

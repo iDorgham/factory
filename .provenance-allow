@@ -1,0 +1,12 @@
+# Commits that predate the provenance-trailer convention (CONTRIBUTING §3.1).
+# One full or abbreviated SHA per line; '#' starts a comment.
+# These P0/P1 commits are grandfathered; every newer commit must carry
+# AI-Tool and AI-Model trailers.
+9398dfea1192ef8e1ef92a02f0118e293c7b4c03  # P1: git worktrees, merge queue + Undo
+5dfdf19a3cb8eba9dd5f80854b46449802bc22cc  # P1: Solo dashboard + request-changes
+a3fde93bef9cc2bdbc23ef727fb785b80202d27c  # P1: adapter conformance suite
+92b0b2af7f6e4bd18382285d005eca553e6727b2  # P1: checkpoints, SHA-bound approval
+fd061309071371917433cbd087597710b06c8939  # P1: stage-graph engine, adapter runtime
+f1ffc41ce6b5279ed8ebe570fc306afc98aa55f9  # P0 polish: lease guard, transition audit
+b96c6c596da3fa351f6d26570a1b91ffeefa6fb4  # P0 hardening: atomic writes, schemas, doctor
+d328d49b792251ea88dd91393239d7d558ddb00e  # P0 skeleton import

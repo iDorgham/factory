@@ -49,7 +49,7 @@ def test_needs_you_card_binds_to_checkpoint_sha(demo_job):
     assert card["job"] == job["id"]
     assert card["sha"] == kernel.job_status(job["id"])["checkpoints"][-1]["sha"]
     actions = {a["id"] for a in card["actions"]}
-    assert actions == {"approve", "change"}
+    assert actions == {"approve", "change", "explain"}
 
 
 def test_undo_reports_unavailable(demo_job):
@@ -94,6 +94,40 @@ def test_dispatch_reports_kernel_errors(demo_job):
     result = dispatch(kernel, {"command": "approve", "job_id": job["id"], "sha": "0" * 64})
     assert result["ok"] is False
     assert "does not match checkpoint" in result["error"]
+
+
+def test_explain_is_event_derived_plain_language(demo_job):
+    kernel, job = demo_job
+    kernel.job_execute(job["id"])
+
+    result = dispatch(kernel, {"command": "explain", "job_id": job["id"]})
+    assert result["ok"] is True
+    text = "\n".join(result["explanation"])
+    assert "Goal: " in text
+    # awaiting_human: checkpoint sha + honest next steps
+    assert "checkpoint " in text
+    assert "Approve" in text and "Change this…" in text
+    # no invented claims: brief text is quoted as the goal
+    assert job["brief"][:10] in text
+
+
+def test_needs_you_stalled_card_offers_explain(kernel):
+    kernel.project_create("s", mode="solo", domain="web")
+    checks_path = kernel.projects_dir / "s" / "checks.json"
+    import json as _json
+    checks_path.write_text(_json.dumps(
+        {"build": {"cmd": "exit 1", "required": True}}), encoding="utf-8")
+    job = kernel.job_run("s", "stall probe")
+    result = kernel.job_execute(job["id"])
+    from factory_kernel.dashboard import build_view
+    card = build_view(kernel)["needs_you"]
+    if result["state"] != "stalled":
+        return  # the profile parked at its human gate before stalling
+    assert card["kind"] == "stalled"
+    assert [a["id"] for a in card["actions"]] == ["explain"]
+    ex = dispatch(kernel, {"command": "explain", "job_id": job["id"]})
+    assert ex["ok"] is True
+    assert "identical failure" in "\n".join(ex["explanation"])
 
 
 def test_dispatch_unknown_command(kernel):

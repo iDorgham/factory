@@ -13,6 +13,7 @@ from .engine import EngineError
 from .kernel import Kernel, KernelError
 from .lease import LeaseError
 from .profiles import ProfileError
+from .provenance import DEFAULT_REQUIRED, ProvenanceError, verify
 from .schemas import SchemaError
 from .state import StateError
 
@@ -62,6 +63,31 @@ def _adapter_test(kernel, args) -> int:
     }
     print(json.dumps(report, indent=2))
     return 0 if report["passed"] else 1
+
+
+def _provenance_verify(root: Path, args) -> int:
+    """Verify build provenance (AI trailers) across the repository history."""
+    required = tuple(s.strip() for s in args.require.split(",") if s.strip())
+    allowlist = args.allowlist or (root / ".provenance-allow")
+    report = verify(
+        root,
+        required=required,
+        rev_range=args.rev_range,
+        allow=args.allow,
+        allow_all_before=args.all_before,
+        allowlist_path=allowlist,
+    )
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        status = "OK" if report["ok"] else "FAIL"
+        print(
+            f"provenance: {status} "
+            f"({report['checked']} commits checked, required {', '.join(report['required'])})"
+        )
+        for v in report["violations"]:
+            print(f"  missing {', '.join(v['missing'])}: {v['sha'][:12]} {v['subject']}")
+    return 0 if report["ok"] else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -122,6 +148,13 @@ def main(argv: list[str] | None = None) -> int:
     p_jundo = p_job_sub.add_parser("undo", help="Revert the merge of an approved job")
     p_jundo.add_argument("job_id")
 
+    p_janswer = p_job_sub.add_parser("answer", help="Answer an open blocking question")
+    p_janswer.add_argument("job_id")
+    p_janswer.add_argument("question_id")
+    p_janswer.add_argument("answer")
+    p_janswer.add_argument("--adapter", default=None,
+                           help="Adapter the job ran with (resume with the same one)")
+
     # ops
     sub.add_parser("doctor")
     sub.add_parser("reindex")
@@ -138,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
     p_rc = sub.add_parser("request-changes", help="Send feedback from the approval card")
     p_rc.add_argument("job_id")
     p_rc.add_argument("feedback")
+    p_rc.add_argument("--adapter", default=None,
+                      help="Adapter the job ran with (resume with the same one)")
 
     # adapter
     p_adapter = sub.add_parser("adapter", help="Adapter commands")
@@ -146,6 +181,24 @@ def main(argv: list[str] | None = None) -> int:
     p_atest.add_argument("adapter_id")
     p_atest.add_argument("--no-record", action="store_true",
                          help="Do not write conformance.json into the adapter folder")
+
+    # provenance
+    p_prov = sub.add_parser("provenance", help="Build provenance (AI trailers)")
+    p_prov_sub = p_prov.add_subparsers(dest="prov_cmd", required=True)
+    p_pverify = p_prov_sub.add_parser(
+        "verify", help="Verify commits carry the required provenance trailers"
+    )
+    p_pverify.add_argument("--range", dest="rev_range", default=None,
+                           help="git revision range, e.g. HEAD~5..HEAD")
+    p_pverify.add_argument("--require", default=",".join(DEFAULT_REQUIRED),
+                           help="Comma-separated required trailer keys")
+    p_pverify.add_argument("--allow", action="append", default=[],
+                           help="Exempt a SHA (repeatable)")
+    p_pverify.add_argument("--all-before", default=None,
+                           help="Grandfather this SHA and every older commit")
+    p_pverify.add_argument("--allowlist", default=None,
+                           help="Allowlist file (default: <root>/.provenance-allow)")
+    p_pverify.add_argument("--json", action="store_true", help="Emit a JSON report")
 
     args = parser.parse_args(argv)
     root = args.root or _root()
@@ -187,6 +240,10 @@ def main(argv: list[str] | None = None) -> int:
             elif args.job_cmd == "undo":
                 result = k.job_undo(args.job_id)
                 print(json.dumps(result, indent=2))
+            elif args.job_cmd == "answer":
+                result = k.job_answer(args.job_id, args.question_id, args.answer,
+                                      adapter_id=args.adapter)
+                print(json.dumps(result, indent=2))
 
         elif args.cmd == "doctor":
             report = k.doctor()
@@ -196,6 +253,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "adapter":
             if args.adapter_cmd == "test":
                 return _adapter_test(k, args)
+
+        elif args.cmd == "provenance":
+            if args.prov_cmd == "verify":
+                return _provenance_verify(root, args)
 
         elif args.cmd == "reindex":
             print(json.dumps(k.reindex(), indent=2))
@@ -212,13 +273,14 @@ def main(argv: list[str] | None = None) -> int:
             print(str(out))
 
         elif args.cmd == "request-changes":
-            result = k.job_request_changes(args.job_id, args.feedback)
+            result = k.job_request_changes(args.job_id, args.feedback,
+                                           adapter_id=args.adapter)
             print(json.dumps(result, indent=2))
 
         return 0
 
     except (KernelError, StateError, LeaseError, SchemaError, ProfileError,
-            EngineError, CheckError, AdapterError) as e:
+            EngineError, CheckError, AdapterError, ProvenanceError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

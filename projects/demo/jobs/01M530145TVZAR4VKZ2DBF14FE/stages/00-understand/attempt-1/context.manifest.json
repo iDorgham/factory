@@ -1,0 +1,32 @@
+{
+  "attempt": 1,
+  "files": [
+    {
+      "path": "brief.md",
+      "role": "required",
+      "tokens": 35
+    },
+    {
+      "mode": "summary",
+      "path": "memory/conventions.md",
+      "role": "reference",
+      "tokens": 7
+    },
+    {
+      "mode": "summary",
+      "path": "memory/decisions.md",
+      "role": "reference",
+      "tokens": 8
+    }
+  ],
+  "job_id": "01M530145TVZAR4VKZ2DBF14FE",
+  "repo_map": {
+    "entry_points": [],
+    "symbols": {}
+  },
+  "stage": "understand",
+  "summaries": {
+    "lessons": ""
+  },
+  "token_budget": 80000
+}

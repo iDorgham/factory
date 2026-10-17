@@ -13,6 +13,7 @@
       "enum": [
         "job.created",
         "job.state_changed",
+        "job.question_asked",
         "stage.started",
         "stage.attempt_started",
         "stage.attempt_finished",

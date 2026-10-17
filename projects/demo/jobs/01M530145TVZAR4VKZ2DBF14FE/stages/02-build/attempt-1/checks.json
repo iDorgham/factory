@@ -1,0 +1,49 @@
+{
+  "results": [
+    {
+      "cmd": "echo 'lint placeholder'",
+      "duration_s": 0.015,
+      "exit_code": 0,
+      "id": "lint",
+      "output": "'lint placeholder'",
+      "passed": true,
+      "required": true,
+      "timed_out": false
+    },
+    {
+      "cmd": "echo 'typecheck placeholder'",
+      "duration_s": 0.015,
+      "exit_code": 0,
+      "id": "typecheck",
+      "output": "'typecheck placeholder'",
+      "passed": true,
+      "required": false,
+      "timed_out": false
+    },
+    {
+      "cmd": "echo 'unit tests placeholder'",
+      "duration_s": 0.015,
+      "exit_code": 0,
+      "id": "unit",
+      "output": "'unit tests placeholder'",
+      "passed": true,
+      "required": true,
+      "timed_out": false
+    },
+    {
+      "cmd": "echo 'build placeholder'",
+      "duration_s": 0.014,
+      "exit_code": 0,
+      "id": "build",
+      "output": "'build placeholder'",
+      "passed": true,
+      "required": true,
+      "timed_out": false
+    }
+  ],
+  "summary": {
+    "failed": [],
+    "passed": true,
+    "required_failed": []
+  }
+}
