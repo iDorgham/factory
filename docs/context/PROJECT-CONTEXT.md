@@ -1,6 +1,6 @@
 # Enterprise AI Software Factory — Full Project Context
 
-> A portable briefing for any AI tool or model. Snapshot date: **2026-10-16** (reconciled against working tree: 205 tests collected, worktrees/merge/undo verified in code).
+> A portable briefing for any AI tool or model. Snapshot date: **2026-10-17** (reconciled against working tree: 286 tests collected, P2.1 guards machine-verified in code and commit history).
 > Everything below is grounded in the repository. Where something is unknown, it is labeled as unknown.
 
 ---
@@ -153,6 +153,8 @@ cancelled | superseded → archived
 | `conformance.py` | Adapter conformance suite (§20.3): start, contract-file, usage, write-boundary, injected-instruction, plus capability-gated cancel/resume/heartbeat. Records `conformance.json`. |
 | `dashboard.py` | `build_view` (three-element Solo view), `render_html`, `export_dashboard` (static snapshot), `serve` (stdlib HTTP server + SSE + `POST /api/command`), `dispatch`. |
 | `gitrepo.py` | Factory-managed git: per-project repo + `base_commit`, per-job worktree/branch, checkpoint commits, `--no-ff` merge queue (conflict → `blocked`), revert/reset Undo. |
+| `provenance.py` | Commit provenance trailer conventions (per `CONTRIBUTING.md` §3.1). |
+| `guards.py` | Pure deterministic diff guards (`no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff`) + registry, `GUARDS`; hard-fail on unknown id, exact-path structural `authorized()`. |
 | `cli.py` | The `factory` command (see §9). |
 
 ---
@@ -165,11 +167,11 @@ factory/
 ├── factory                      # CLI launcher script
 ├── pyproject.toml               # packaging (factory-kernel 0.4.0) + pytest + flake8
 ├── kernel/
-│   ├── schemas/                 # event, job, project, context.manifest + CHANGELOG
+│   ├── schemas/                 # event, job, project, context.manifest, authorizations + CHANGELOG
 │   ├── presets/                 # solo.json, team.json, enterprise.json
 │   ├── stages/                  # lite.yaml, standard.yaml
-│   └── src/factory_kernel/      # the Python reference kernel (17 modules)
-├── tests/                       # hermetic pytest suite (242 collected: 240 passed, 2 skipped)
+│   └── src/factory_kernel/      # the Python reference kernel (20 modules)
+├── tests/                       # hermetic pytest suite (286 collected: 284 passed, 2 skipped)
 │   └── fixtures/adapters/slow/  # adapter fixture exercising cancel/resume/heartbeat
 ├── roles/                       # markdown role contracts (5 starter: analyst, planner, builder, verifier, integrator)
 ├── adapters/echo/               # deterministic echo adapter (manifest.json, run.py, conformance.json)
@@ -265,7 +267,7 @@ Root/actor overrides: `--root`, `--actor`.
 |-------|---------|--------|
 | **P0 Kernel core** | events/snapshot, atomic writes, leases+fencing, schema validation, check runner, `doctor`, `reindex` | ✅ Complete |
 | **P1 Solo slice** | lite execution, adapter runtime, build loop, checkpoints + SHA-bound approval, conformance suite, dashboard | 🚧 **In progress — mostly implemented** |
-| **P2 Trust layer** | budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline | ⬜ Planned |
+| **P2 Trust layer** | budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline | 🚧 **In progress — P2.1 guards landed** (diff collection, three deterministic guards, engine hook, plain-language dashboard verdicts, doctor integrity checks) |
 | **P3 Learning** | eval harness, skill packages + promotion, lessons ledger, memory | ⬜ Planned |
 | **P4 Team** | more adapters via conformance, epics + dependencies, visual baselines, named users | ⬜ Planned |
 | **P5 Enterprise** | control plane, RBAC, hash-chained audit + anchors, brand design systems, compliance export | ⬜ Planned |
@@ -289,8 +291,8 @@ factory-managed git worktrees + merge queue (conflict → `blocked`) + Undo (`me
 - **Packaging:** `factory-kernel` v0.4.0; console script `factory`.
 - **Run tests:** `pip install -e ".[dev]"` then `python -m pytest` and `python -m flake8 kernel/src tests`.
 - **Hermetic tests:** each test builds a throwaway factory tree in `tmp_path` from the real schemas/presets/stages.
-- **Source metrics:** 19 kernel modules (includes checkpoint, conformance, dashboard, gitrepo, provenance); 8 git commits (all authored by `iDorgham`, dated 2026-10-16).
-- **Test count (verified 2026-10-17, working tree):** `242 collected — 240 passed, 2 skipped`. Test files: atomic, ulid, hashing, lease, state, transitions, profiles, schemas, kernel, doctor, engine, checks, context, adapters, cli-agent, checkpoint, conformance, dashboard, worktree (git/merge/undo/isolation), questions (Solo question budget), visual_capture (real capture producer + diffs), explain dispatched from dashboard, provenance.
+- **Source metrics:** 20 kernel modules (includes checkpoint, conformance, dashboard, gitrepo, provenance, guards); commit history carries `AI-Tool`/`AI-Model` provenance trailers per-commit since P2.1 (machine-verified by the commit-msg hook).
+- **Test count (verified 2026-10-17, working tree):** `286 collected — 284 passed, 2 skipped`. Test files: atomic, ulid, hashing, lease, state, transitions, profiles, schemas, kernel, doctor, engine, checks, context, adapters, cli-agent, checkpoint, conformance, dashboard, worktree (git/merge/undo/isolation), questions (Solo question budget), visual_capture (real capture producer + diffs), explain dispatched from dashboard, provenance, guards (P2.1: guard units, diff collection, engine hook, doctor authorizations).
 
 ---
 
@@ -298,8 +300,8 @@ factory-managed git worktrees + merge queue (conflict → `blocked`) + Undo (`me
 
 1. **Worktree lifecycle (done, verify edge cases)** — `.work/<job-id>/` is now a real git worktree (`gitrepo.add_worktree`, branch `factory/<job-id>`). Open: port-range allocation, orphan/stale-base handling under concurrent jobs (P4).
 2. **Question budget open** — `echo`/`cli-agent` can emit `question` events but the engine never counts them; no ≤ 3 cap, no `blocked` on exhaustion, no dashboard surfacing (needs the schema migration noted in the P1 plan).
-3. **Guards not executed** — `no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff` are declared in profiles but not yet enforced over real diffs (P2).
-4. **Budgets declared but not enforced** — every stage has a `budget` in YAML, but there is no metering/stop yet (P2).
+3. **Guards not executed** — *closed 2026-10-17 (P2.1)*: `no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff` run per attempt over the diff from the attempt-base commit; violations fail the attempt, feed the fingerprint (repeat → stalled), land as hash-chained events, and are authorized structurally by per-job `authorizations.json` (exact paths, schema-validated). `scope_guard` and plan-file-set authorization remain future. **Budgets/metering (gap #4) is now the head of the P2 queue.**
+4. **Budgets declared but not enforced** — every stage has a `budget` in YAML, but there is no metering/stop yet (P2; next up).
 5. **Sandbox is config-only** — `factory.json` declares a sandbox, but no process/container isolation is implemented (P2).
 6. **No risk scoring** — `verify` declares `gate: risk_scored`, but the score computation is absent (P2).
 7. Undo/merge — done (`gitrepo.merge_branch`/`revert_merge`, `kernel._merge_on_complete`/`job_undo`, conflict → `blocked`, `merge.undone`; dashboard Undo enabled when a merge is present).

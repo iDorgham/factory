@@ -116,6 +116,52 @@ Kernel-side P1 increment (P1 plan workstreams 1/2/6 groundwork):
 
 ---
 
+## P2 — Trust layer
+
+### P2.1 — Guards over the diff (2026-10-17, commits `f5815b9` … `9010e60`)
+
+Implements [P2-trust-layer.md](../plans/P2-trust-layer.md) workstream 2 (spec §9.3). Guards are pure
+kernel functions over the attempt diff — no subprocesses, no LLM — under the same discipline as
+`checks.py`: declared by stage profiles, executed only by the kernel, recorded as hash-chained events.
+
+- **Structural authorization** (`f5815b9`): new kernel-owned file type `authorizations.json`
+  (per job; exact-path allowlists `allowed_test_deletions`/`allowed_dep_changes`; schema strictly
+  rejects unknown keys and duplicates; wildcards never match — a human authorizes a file they can
+  name). Replaces plan-prose parsing by design. Event schema gains `guards.completed` and
+  `guard.violation`. Six TDD-red tests committed first.
+- **Diff extraction** (`741bf84`): `gitrepo.collect_diff(worktree, base)` — per-attempt scope
+  ("guards run after every round"): committed, staged, unstaged, and untracked files; line content
+  from the unified diff text only inside `@@` hunks; binary files flagged via `numstat` and never
+  decoded; renames disabled so `D`+`A` stay honest.
+- **Guard core** (`12f231f`): `guards.py` — `no_test_deletion` (deletion of test-shaped files, exact
+  authorization), `no_lockfile_surprise` (manifest↔lockfile move together; deletion flagged),
+  `no_secret_in_diff` (added lines only: AWS keys, `ghp_`, PEM blocks, credential assignments;
+  base64 blobs ≥100 chars and 64-hex hex are benign by design). Unknown guard id → `GuardError`
+  (fail-hard, same policy as a check missing from `checks.json`).
+- **Engine hook** (`42b8ae6`): attempt-base recorded at attempt start; guards run after checks,
+  before the accept decision; verdict flips the attempt to `failed` even when all checks passed;
+  guard ids+paths feed the failure fingerprint so repeated identical violations hit the existing
+  no-progress detection (`stalled`) instead of burning rounds; `guard.violation` per (guard, kind)
+  group plus compact `paths`; `guards.json` beside `checks.json`; config problems (unknown id,
+  invalid authorizations) become `guard_config` pseudo-guard violations — recorded events, never
+  silent skips. Authorizations live at job level (§5.2: attempts are disposable caches).
+- **Dashboard** (`8f2e8de`): plain-language timeline verdict per guarded stage (latest attempt wins):
+  "⚠ Guard flagged deleted tests in tests/test_app.py" / "✓ Guards clean", with a red dot; raw kind
+  id is the fallback so a future guard never renders as an empty sentence.
+- **Doctor** (`9010e60`): advisory check that every guard id declared in `kernel/stages/*.yaml`
+  exists in the registry (warnings, sorted by stage then guard id, naming the file to fix), plus
+  authoritative schema validation of each job's `authorizations.json` (errors — a corrupt
+  kernel-owned policy file must never read as "no authorization").
+- History nuance worth keeping: the first commit with risk of silent cheating was caught here —
+  the TDD suite failed once because a fixture `M`-status case needed the file committed to base
+  first (`A` is an honest addition, `M` is the case that can hide deletion).
+- **First machine-verified provenance phase:** this and all subsequent commits carry
+  `AI-Tool`/`AI-Model` trailers enforced by the commit-msg hook (see
+  [AI-PROVENANCE.md](AI-PROVENANCE.md) §3). Suite: **286 collected — 284 passed, 2 skipped**;
+  flake8 clean; `doctor` ok on the real tree (5 projects, 10 jobs, no guard warnings).
+
+---
+
 ## Post-HEAD work (not yet committed)
 
 Performed by the documentation session (see [AI-PROVENANCE.md](AI-PROVENANCE.md)):
@@ -229,6 +275,7 @@ uncommitted in the working tree; test counts below are from the current suite.
 | uncommitted (question budget + visual plumbing, session B) | 222 / 224 (2 skipped) |
 | uncommitted (real visual capture, session C) | 234 / 236 (2 skipped) |
 | uncommitted (explain + diff polish, session C2) | **240 / 242** (2 skipped) |
+| `9010e60` (P2.1 guards complete) | **284 / 286** (2 skipped) |
 
 ---
 

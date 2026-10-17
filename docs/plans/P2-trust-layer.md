@@ -1,7 +1,7 @@
 # P2 — Trust Layer Plan
 
 **Phase:** P2
-**Status:** ⬜ Planned
+**Status:** 🚧 In progress (P2.1 guards landed 2026-10-17; workstream 1 budgets/metering is next)
 **Goal:** Make it safe to leave running: budgets enforced, anti-cheating guards active, sandbox hardened, risk-scored gates in place, and honest baselines on import.
 
 **Depends on:** [P1](P1-solo-slice.md) demonstrably reliable.
@@ -16,12 +16,12 @@
 - [ ] Mid-run cut-off for adapters that support it
 
 ### 2. Guards (anti-cheating), deterministic over the diff
-- [ ] `no_test_deletion` — tests may not be deleted/skipped/weakened without an explicit plan task
+- [x] `no_test_deletion` — tests may not be deleted/skipped/weakened without an explicit plan task *(P2.1: deletion guarded; skip/weakening detection is a follow-up)*
 - [ ] `no_check_tampering` — check config, CI files, lint rules read-only unless plan-authorized
-- [ ] `no_lockfile_surprise` — dependency changes must match the plan
-- [ ] `no_secret_in_diff` — secret scanning on every diff
+- [x] `no_lockfile_surprise` — dependency changes must match the plan *(P2.1: manifest↔lockfile must move together; plan-declared file-set pairing is a follow-up)*
+- [x] `no_secret_in_diff` — secret scanning on every diff *(P2.1: added lines only; base64 hashes/data blobs excluded as benign)*
 - [ ] `scope_guard` — out-of-plan files allowed but raise the risk score
-- [ ] Guards run after every round; violations recorded as events
+- [x] Guards run after every round; violations recorded as events *(P2.1: per attempt, from the attempt-base SHA; fingerprint-fed so repeats stall)*
 
 ### 3. Sandbox hardening
 - [ ] Filesystem limited to job worktree + temp; network egress allowlist; resource limits; no inherited env beyond an explicit list

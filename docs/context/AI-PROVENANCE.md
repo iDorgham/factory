@@ -41,13 +41,16 @@ So every phase of code in the repository (P0 and all of P1) was produced with th
 | **P1 Solo slice** (4 — dashboard) | `5dfdf19` | Solo dashboard (`serve` SSE + `export-dashboard`), `request-changes` rework loop | OpenCode | Big Pickle | Owner-attested |
 | **P1 Solo slice** (5 — worktrees/merge/undo) | `9398dfe` | Factory-managed git worktrees, checkpoint commits, merge queue (conflict → blocked), Undo (revert/reset) | OpenCode | Big Pickle | Owner-attested |
 | **Documentation** | (uncommitted) | `docs/` tree, root CHANGELOG/CONTRIBUTING/SECURITY, context pack, provenance tool + CI | OpenCode | Big Pickle | Self-observed |
-| **P2 Trust layer** | — | Budgets/metering, guards, sandbox, risk-scored gates, import | not started | not started | — |
+| **P2 Trust layer** (1 — guards) | `f5815b9`, `741bf84`, `12f231f`, `42b8ae6`, `8f2e8de`, `9010e60` | Guards over the diff: authorizations schema, `gitrepo.collect_diff`, three deterministic guards (`no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff`), engine hook (attempt-base diff, events, fingerprint feed, stall on repeat), plain-language dashboard verdicts, doctor integrity checks | OpenCode | GLM-5.3-Flash Free (provider `opencode`) | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
+| **P2 Trust layer** (remaining) | — | Budgets/metering, sandbox, prompt-injection handling, risk-scored gates, import with baseline verification | not started | not started | — |
 | **P3 Learning** | — | Eval harness, skills, lessons, memory | not started | not started | — |
 | **P4 Team** | — | Multi-adapter, epics, visual baselines, named users | not started | not started | — |
 | **P5 Enterprise** | — | Control plane, RBAC, audit chain, brands, compliance | not started | not started | — |
 
-**Summary:** OpenCode + Big Pickle built P0 and P1. The `AI-Tool`/`AI-Model` values are the same across all
-committed code.
+**Summary:** OpenCode + Big Pickle built P0 and P1 (owner-attested). **P2.1 is the first phase with
+machine-verified provenance:** every commit since `f5815b9` carries `AI-Tool`/`AI-Model` trailers that
+the repo's commit-msg hook refuses to merge without (`CONTRIBUTING.md` §3.1), so the tool/model claim
+is now checked by git itself, not by memory. P0/P1 remain attestation because they predate the hook.
 
 ---
 

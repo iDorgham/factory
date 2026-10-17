@@ -35,7 +35,7 @@ docs/
 | [Roadmap](plans/ROADMAP.md) | P0–P5 overview | Active |
 | [P0 Kernel Core](plans/P0-kernel-core.md) | Safe state: events, leases, schemas, doctor | ✅ Implemented |
 | [P1 Solo Slice](plans/P1-solo-slice.md) | Lite profile execution, adapter runtime, build loop, dashboard, worktrees + merge/undo, question budget, real visual capture | ✅ Complete (proven end-to-end; see P1 plan hardening log) |
-| [P2 Trust Layer](plans/P2-trust-layer.md) | Budgets, guards, sandbox, risk-scored gates, import | Planned |
+| [P2 Trust Layer](plans/P2-trust-layer.md) | Budgets, guards, sandbox, risk-scored gates, import | In progress (P2.1 guards landed) |
 | [P3 Learning](plans/P3-learning.md) | Eval harness, skill packages, lessons, memory | Planned |
 | [P4 Team](plans/P4-team.md) | Multi-adapter, epics, visual baselines, named users | Planned |
 | [P5 Enterprise](plans/P5-enterprise.md) | Control plane, RBAC, audit chain, brands, compliance | Planned |

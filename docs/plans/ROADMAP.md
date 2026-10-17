@@ -8,7 +8,7 @@ One engine, three presets (Solo / Team / Enterprise). Phases are ordered so that
 |-------|---------|--------|------|
 | **P0 Kernel core** | `job.json` + `events.jsonl`, atomic writes, leases and fencing, schema validation, check runner, `factory doctor`, `factory reindex` | ✅ Implemented (236 collected: 234 passed, 2 skipped — shared suite) | [P0](P0-kernel-core.md) |
 | **P1 Solo slice** | `lite` profile execution, adapter runtime + build loop, checkpoints + SHA-bound approval, conformance suite, `factory serve` dashboard, git worktrees + merge queue + Undo, live `cli-agent` backend, question budget, real visual capture | ✅ Complete — 236 collected: 234 passed, 2 skipped; proven end-to-end | [P1](P1-solo-slice.md) |
-| **P2 Trust layer** | Budgets and metering, guards, sandbox hardening, injection handling, risk-scored gates, import with baseline verification | Planned | [P2](P2-trust-layer.md) |
+| **P2 Trust layer** | Budgets and metering, guards, sandbox hardening, injection handling, risk-scored gates, import with baseline verification | In progress (P2.1 guards landed) | [P2](P2-trust-layer.md) |
 | **P3 Learning** | Eval harness, skill packages and promotion, lessons ledger, repo map and memory | Planned | [P3](P3-learning.md) |
 | **P4 Team** | More adapters via conformance suite, epics and dependencies, visual baselines, named users and reviewer assignment | Planned | [P4](P4-team.md) |
 | **P5 Enterprise** | Control plane, RBAC, hash-chained audit and anchors, brand design systems with lint, compliance exports | Planned | [P5](P5-enterprise.md) |
