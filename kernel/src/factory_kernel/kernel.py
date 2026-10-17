@@ -10,9 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import yaml
+
 from .atomic import atomic_write_json, read_json
 from .checkpoint import result_hash
 from .gitrepo import add_worktree, git_available, init_repo, is_repo, merge_branch, revert_merge
+from .guards import GUARDS
 from .lease import LeaseManager, LeaseError
 from .profiles import load_profile
 from .schemas import SchemaError, SchemaStore
@@ -490,6 +493,8 @@ class Kernel:
                 "concurrent mode is unsupported on network filesystems."
             )
 
+        self._doctor_profile_guards(report)
+
         for proj_dir in sorted(self.projects_dir.iterdir()):
             if not proj_dir.is_dir():
                 continue
@@ -524,6 +529,38 @@ class Kernel:
                 report["warnings"].append(f"Orphan worktree: {wt.name}")
 
         return report
+
+    def _doctor_profile_guards(self, report: dict) -> None:
+        """Advisory: every guard id declared by a stage profile must exist.
+
+        Read-only and order-stable: findings are emitted sorted by stage name,
+        then guard id, each naming the profile file that declares it. Doctor
+        is advisory here — the runtime already hard-fails unknown ids through
+        the ``guard_config`` pseudo-guard (spec §5.3: invariants the kernel
+        enforces); doctor surfaces a typo at boot instead of mid-job.
+        """
+        if not self.stages_dir.exists():
+            return
+        missing = []
+        for path in sorted(self.stages_dir.glob("*.yaml")):
+            try:
+                doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            except (yaml.YAMLError, OSError) as e:
+                self._fail(report, f"stages/{path.name}: unreadable YAML ({e})")
+                continue
+            if not isinstance(doc, dict):
+                self._fail(report, f"stages/{path.name}: malformed profile")
+                continue
+            for stage in doc.get("stages") or []:
+                stage_name = str(stage.get("id") or "?")
+                for guard_id in stage.get("guards") or []:
+                    if guard_id not in GUARDS:
+                        missing.append((stage_name, str(guard_id), path.name))
+        for stage_name, guard_id, filename in sorted(missing, key=lambda m: (m[0], m[1])):
+            report["warnings"].append(
+                f"Stage {stage_name} declares guard {guard_id} but it is not "
+                f"registered (fix stages/{filename})"
+            )
 
     def _doctor_job(self, report: dict, proj_dir: Path, job_dir: Path, now: datetime) -> None:
         label = f"{proj_dir.name}/{job_dir.name}"
@@ -568,6 +605,27 @@ class Kernel:
                 if not wt.exists():
                     report["warnings"].append(
                         f"Job {folded['id']}: no worktree at {wt}"
+                    )
+
+            # Kernel-owned guard authorization file: a corrupt or malformed
+            # one must never be silently read as "no authorization" (spec
+            # §9.3 authorizations are structural, never plan-prose).
+            auth_path = job_dir / "authorizations.json"
+            if auth_path.exists():
+                auth_doc = None
+                try:
+                    auth_doc = read_json(auth_path, default=None)
+                    if auth_doc is not None:
+                        self.schemas.validate("authorizations", auth_doc)
+                except (ValueError, SchemaError) as e:
+                    self._fail(report,
+                               f"Job {folded['id']} has invalid "
+                               f"authorizations.json: {e}")
+                if auth_doc is None:
+                    self._fail(
+                        report,
+                        f"Job {folded['id']} has invalid authorizations.json: "
+                        "not a JSON object",
                     )
         except Exception as e:
             self._fail(report, f"{label}: {e}")
