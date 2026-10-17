@@ -104,6 +104,164 @@ def commit_all(path: Union[str, Path], message: str) -> Optional[str]:
     return head(path)
 
 
+def _git_bytes(cwd: Union[str, Path], *args: str) -> subprocess.CompletedProcess:
+    """Like ``_git`` but returns raw bytes so the caller controls decoding."""
+    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True)
+
+
+def _decode(raw: bytes) -> str:
+    return raw.decode("utf-8", errors="replace")
+
+
+# Common binary assets: never read as text and never scanned for secrets.
+BINARY_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".avif",
+    ".pdf", ".zip", ".gz", ".tgz", ".tar", ".7z", ".rar", ".jar",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    ".mp3", ".mp4", ".avi", ".mov", ".flac", ".ogg", ".wav",
+    ".exe", ".dll", ".so", ".dylib", ".bin", ".class", ".obj", ".lib",
+    ".pyc", ".pyd", ".sqlite", ".db",
+}
+
+
+def _looks_binary(raw: bytes) -> bool:
+    """NUL bytes are the practical tell for binary content (same rule as git)."""
+    return b"\x00" in raw[:8192]
+
+
+def _unquote(path: str) -> str:
+    path = path.strip()
+    if len(path) >= 2 and path.startswith('"') and path.endswith('"'):
+        path = path[1:-1]
+    return path
+
+
+def _strip_prefix(path: str) -> str:
+    return path[2:] if len(path) > 2 and path[1] == "/" else path
+
+
+def _name_statuses(wt: Path, base_sha: str) -> dict[str, str]:
+    """Per-file status (``A`` | ``M`` | ``D``) of ``git diff <base>``."""
+    proc = _git_bytes(wt, "diff", "--no-renames", "-z", "--name-status", base_sha)
+    statuses: dict[str, str] = {}
+    if proc.returncode != 0:
+        return statuses
+    fields = _decode(proc.stdout).split("\0")
+    i = 0
+    while i < len(fields) - 1:
+        code, path = fields[i], fields[i + 1]
+        if not code or not path:
+            break
+        if code[0] == "T":
+            statuses[path] = "M"  # type change: treat as modification
+        elif code in ("A", "M", "D"):
+            statuses[path] = code
+        i += 2
+    return statuses
+
+
+def _binary_paths(wt: Path, base_sha: str) -> set[str]:
+    """Paths whose diff is binary (``numstat`` reports ``-`` for line counts)."""
+    proc = _git_bytes(wt, "diff", "--no-renames", "--numstat", "-z", base_sha)
+    paths: set[str] = set()
+    if proc.returncode != 0:
+        return paths
+    for record in _decode(proc.stdout).split("\0"):
+        if not record:
+            continue
+        counts, _sep, path = record.partition("\t")
+        added, _tab, removed = counts.partition("\t")
+        if added == "-" or removed == "-":
+            paths.add(path.strip())
+    return paths
+
+
+def _parse_patch(text: str) -> dict[str, tuple[list[str], list[str]]]:
+    """Line content (added, removed) per path from a unified diff.
+
+    Only lines inside ``@@`` hunks are treated as content, so header lines
+    (``---``/``+++``/``old mode``) never leak in. ``\\ No newline`` markers
+    are skipped. Renames are disabled upstream, so one path per section.
+    """
+    added: list[str] = []
+    removed: list[str] = []
+    a_path = b_path = None
+    in_hunk = False
+    current = None
+    content: dict[str, tuple[list[str], list[str]]] = {}
+    for line in text.splitlines():
+        if line.startswith("diff --git "):
+            if current is not None:
+                content[current] = (added, removed)
+            a_path = b_path = current = None
+            in_hunk, added, removed = False, [], []
+        elif line.startswith("--- "):
+            a_path = None if line == "--- /dev/null" else _strip_prefix(
+                _unquote(line[4:]))
+        elif line.startswith("+++ "):
+            b_path = None if line == "+++ /dev/null" else _strip_prefix(
+                _unquote(line[4:]))
+            current = b_path or a_path
+        elif line.startswith("@@"):
+            in_hunk = True
+        elif in_hunk and current is not None:
+            if line.startswith("+"):
+                added.append(line[1:])
+            elif line.startswith("-"):
+                removed.append(line[1:])
+            # "\ No newline at end of file" and context lines are skipped.
+    if current is not None:
+        content[current] = (added, removed)
+    return content
+
+
+def _untracked_files(wt: Path) -> list[str]:
+    """Untracked paths (respecting .gitignore), NUL-separated for safety."""
+    proc = _git_bytes(wt, "ls-files", "--others", "--exclude-standard", "-z")
+    if proc.returncode != 0:
+        return []
+    return [p for p in _decode(proc.stdout).split("\0") if p]
+
+
+def collect_diff(worktree: Union[str, Path], base_sha: str) -> dict:
+    """Everything the attempt changed relative to ``base_sha`` (spec §9.3).
+
+    Guards run after every round, so this must capture the whole round: files
+    the adapter committed, staged or merely edited, and untracked files. Line
+    content is read from the unified diff text; binary files are marked
+    ``binary: True`` with no content so secret scanning never decodes bytes.
+    Returns ``{}`` for a clean worktree.
+    """
+    wt = Path(worktree)
+    if not is_repo(wt) or not head(wt) or not base_sha:
+        return {}
+
+    diff: dict[str, dict] = {}
+    statuses = _name_statuses(wt, base_sha)
+    binaries = _binary_paths(wt, base_sha)
+    content = _parse_patch(_decode(
+        _git_bytes(wt, "diff", "--no-renames", "-p", "--no-color", base_sha).stdout))
+    for path, status in statuses.items():
+        if path in binaries:
+            diff[path] = {"status": status, "binary": True}
+            continue
+        added, removed = content.get(path, ([], []))
+        diff[path] = {"status": status, "added": added, "removed": removed,
+                      "binary": False}
+
+    for path in _untracked_files(wt):
+        if path in diff:
+            continue
+        raw = (wt / path).read_bytes()
+        if Path(path).suffix.lower() in BINARY_EXTENSIONS or _looks_binary(raw):
+            diff[path] = {"status": "A", "binary": True}
+            continue
+        text = _decode(raw)
+        diff[path] = {"status": "A", "added": text.splitlines(),
+                      "removed": [], "binary": False}
+    return diff
+
+
 def init_repo(path: Union[str, Path], project: str = "project") -> str:
     """Create a factory-managed repository with an initial commit.
 

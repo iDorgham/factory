@@ -91,7 +91,8 @@ class TestAuthorizationsSchema:
         doc = {"allowed_test_deletions": ["tests/**", "tests/*"]}
         assert store.is_valid("authorizations", doc)  # shape is valid…
         from factory_kernel.guards import authorized
-        assert authorized(doc, "tests/test_app.py") is False  # …matching is not
+        assert (authorized(doc, "allowed_test_deletions", "tests/test_app.py")
+                is False)  # …matching is not
 
 
 # ----------------------------------------------------------------------
@@ -317,9 +318,9 @@ class TestCollectDiff:
     def test_modified_and_uncommitted(self, wt):
         from factory_kernel.gitrepo import collect_diff, commit_all, head
 
-        base = head(wt)
         self._write(wt, "src/app.py", "x = 1\n")
         commit_all(wt, "seed")
+        base = head(wt)  # app.py committed; base-to-worktree diff is a modification
         self._write(wt, "src/app.py", "x = 2\n")  # uncommitted edit
         diff = collect_diff(wt, base)
         entry = diff["src/app.py"]
