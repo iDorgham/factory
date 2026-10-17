@@ -61,12 +61,21 @@ def _git(cwd: Union[str, Path], *args: str, check: bool = True) -> subprocess.Co
 
 
 def is_repo(path: Union[str, Path]) -> bool:
-    """True if ``path`` is inside a git work tree (main repo or job worktree)."""
+    """True if ``path`` is itself a git repository root or a linked worktree.
+
+    Only a ``.git`` entry directly under ``path`` counts (a directory for a
+    repository root, a file for a linked worktree). Unlike
+    ``rev-parse --is-inside-work-tree`` this never walks up to a parent
+    repository, so a plain job directory nested inside some outer checkout
+    (e.g. a legacy repo-less project's worktree inside the factory's own
+    clone) is NOT mistaken for a worktree. The walk-up behavior caused
+    checkpoint commits to land in the outer repo and ``reset --hard`` to
+    rewrite it, silently dropping job events (spec §239 isolation).
+    """
     path = Path(path)
-    if not path.exists() or not git_available():
+    if not path.is_dir() or not git_available():
         return False
-    proc = _git(path, "rev-parse", "--is-inside-work-tree", check=False)
-    return proc.returncode == 0 and proc.stdout.strip() == "true"
+    return (path / ".git").exists()
 
 
 def head(path: Union[str, Path]) -> Optional[str]:

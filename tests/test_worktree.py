@@ -142,7 +142,79 @@ def test_resume_restores_worktree_to_checkpoint(demo_job):
     assert head(worktree) == checkpoint_commit
 
 
+def test_repoless_job_inside_outer_checkout_never_touches_outer_repo(
+    kernel, factory_root, tmp_path,
+):
+    """A plain worktree nested in an unrelated outer checkout is not a repo.
+
+    Regression test: ``is_repo`` used ``rev-parse --is-inside-work-tree``,
+    which walks up to a parent repository. A legacy repo-less project's job
+    worktree inside the factory's own clone was therefore mistaken for a
+    worktree: checkpoint commits landed in the outer repo and the resume
+    ``reset --hard`` rewrote it, silently dropping job events and failing
+    the subsequent approve (attempt index past ``max_rounds``).
+    """
+    import json
+
+    # Nest the whole factory tree in an unrelated outer checkout.
+    _git(factory_root, "init", "-b", "main")
+    _git(factory_root, "add", "-A")
+    _git(factory_root, "commit", "-m", "outer: baseline")
+    outer_head = head(factory_root)
+    assert outer_head
+
+    # Simulate a legacy project with no managed repository.
+    kernel.project_create("legacy", mode="solo", domain="web")
+    _rmtree_writable(kernel.projects_dir / "legacy" / "repo")
+    project_path = kernel.projects_dir / "legacy" / "project.json"
+    project = json.loads(project_path.read_text(encoding="utf-8"))
+    project["base_commit"] = None
+    project_path.write_text(json.dumps(project, indent=2), encoding="utf-8")
+
+    job = kernel.job_run("legacy", "Build a landing page")
+    worktree = kernel.work_dir / job["id"]
+    assert not (worktree / ".git").exists()
+    assert not is_repo(worktree)
+
+    kernel.job_execute(job["id"])
+    parked = kernel.job_status(job["id"])
+    assert parked["state"] == "awaiting_human"
+    # Content-hash checkpoints still bind approval; there is just no commit.
+    assert parked["checkpoints"]
+    assert all(c.get("commit") is None for c in parked["checkpoints"])
+    # The outer checkout gained no commits.
+    assert head(factory_root) == outer_head
+
+    done = kernel.job_approve(job["id"])
+    assert done["state"] == "completed"
+    assert done["merge"] is None  # nothing to merge without a project repo
+    assert head(factory_root) == outer_head
+
+    events = [
+        json.loads(line)
+        for line in (
+            kernel.projects_dir / "legacy" / "jobs" / job["id"] / "events.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    types = [e["type"] for e in events]
+    assert "human.approval" in types
+    assert types.count("checkpoint.created") == len(done["checkpoints"])
+
+
 def kernel_error():
     from factory_kernel.kernel import KernelError
 
     return KernelError
+
+
+def _rmtree_writable(path) -> None:
+    """Remove a tree that may contain read-only files (Windows git objects)."""
+    import os
+    import stat
+
+    def onexc(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    shutil.rmtree(path, onexc=onexc)
