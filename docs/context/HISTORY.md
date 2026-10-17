@@ -1,13 +1,15 @@
 # Project History
 
 Complete development history of the Enterprise AI Software Factory, reconstructed from `git log` and the
-repository contents. Snapshot date: **2026-10-16**.
+repository contents. Snapshot date: **2026-10-17**.
 
-- **Repository:** local git repo, branch `master`, HEAD `9398dfe` (was `5dfdf19` after the new commit).
+- **Repository:** local git repo (no upstream remote), branch `master`, HEAD `9948840`, 19 commits.
 - **Author of all commits:** `iDorgham` (`yasser.dorgham@gmail.com`).
-- **All 8 commits are dated 2026-10-16** (a single intensive build day).
+- **Dates:** 8 commits on 2026-10-16 (the P0 + P1 build day), 11 on 2026-10-17 (P1 hardening, P2.1, P2.2).
 - **Tooling:** the owner attests that **P0 and P1 were developed with OpenCode using the Big Pickle model**
-  (not machine-verified; see [AI-PROVENANCE.md](AI-PROVENANCE.md)).
+  (not machine-verified; those commits predate the provenance convention). From P2.1 onward the tool and
+  model are recorded per commit in `AI-Tool` / `AI-Model` trailers and enforced by hook + CI
+  (see [AI-PROVENANCE.md](AI-PROVENANCE.md)).
 
 > Note on a discrepancy: the `README.md` and docs that existed before the documentation reorganization
 > described the project as "P0 complete, P1 planned." The git history shows P1 work had already landed.
@@ -94,7 +96,7 @@ Kernel-side P1 increment (P1 plan workstreams 1/2/6 groundwork):
 - Tests: `test_dashboard` (171 / 173 at the time).
 
 ### 8. `9398dfe` — P1: factory-managed git worktrees, checkpoint commits, merge queue + Undo
-**Phase:** P1 · **Date:** 2026-10-16 · **Current HEAD**
+**Phase:** P1 · **Date:** 2026-10-16
 
 - `gitrepo.py`: thin git wrapper with a fixed identity. Each project owns a repo at `projects/<name>/repo`;
   project create makes an initial commit and records it as the project's `base_commit`.
@@ -160,9 +162,105 @@ kernel functions over the attempt diff — no subprocesses, no LLM — under the
   [AI-PROVENANCE.md](AI-PROVENANCE.md) §3). Suite: **286 collected — 284 passed, 2 skipped**;
   flake8 clean; `doctor` ok on the real tree (5 projects, 10 jobs, no guard warnings).
 
+### 9. `634ff41` — docs: reconcile P2.1 guards implementation with project documentation
+**Phase:** P2 · **Date:** 2026-10-17
+
+Documentation-only commit: updated the roadmap, phase plans, architecture, runbook, and context pack so
+they describe the guards that actually shipped instead of the guards that were planned.
+
 ---
 
-## Post-HEAD work (not yet committed)
+## P2.2 — Budgets and metering (2026-10-17)
+
+### `9558498` — schemas and TDD contracts (red)
+
+Added `budget.schema.json` and `price_table.schema.json`, registered both in `SchemaStore`, and committed
+the test contracts **before** the implementation: `tests/test_budgets.py` (24 cases) plus two engine cases
+for soft-notify and hard-stop. The suite is intentionally red at this commit — the failing tests are the
+specification for the next slice.
+
+### `9948840` — the cost meter itself (`budgets.py`)
+
+Pure cost arithmetic and nothing else — no file I/O, no subprocess, no model:
+
+- `calculate_cost`: any usage key shaped `X_tokens` is priced at `X_per_1m` for that usage's model tier,
+  so `input_tokens` / `output_tokens` / `cached_tokens` need no special case; an unknown model falls back to
+  `default`; a missing tier or rate **raises** `BudgetError`, because unpriced usage that silently costs
+  $0 would make the hard budget unenforceable. Negative counts clamp to 0, non-numeric counts raise.
+- `stage_limits`: `usd` is the required hard limit; `soft_usd` overrides the soft limit, else a
+  deterministic `0.8 × usd` rounded to cents; `soft_usd >= usd` raises rather than silently reordering.
+- `check_budget`: inclusive boundaries (`==` hard stops, `==` soft notifies) and `ok` results carry the
+  decisive bound so callers always know which limit applied.
+
+**Still open (the 5 red tests):** the engine write path — `budget.json` per attempt,
+`budget.soft_exceeded` / `budget.hard_exceeded` events — and the `doctor` checks that warn when soft ≥ hard
+and reject an invalid price table.
+
+**Current suite at `9948840`:** **312 collected — 305 passed, 2 skipped, 5 failed**.
+
+### `08980ed` — the engine write path (budget enforcement live)
+
+`_run_budget` runs after checks and guards, before the accept decision, pricing each attempt's reported
+usage against the stage limits with factory config's price table:
+
+- Verdict into `budget.json` (`{"status", "current_cost", "limit"}`) every budgeted round; the breach
+  events (`budget.soft_exceeded` / `budget.hard_exceeded`) fire **only** on breach — per-attempt cost
+  stays in the file, no per-round timeline noise.
+- A hard breach fails the attempt (budgets are ground truth over reported usage, like guards) and
+  `_run_stage` reads the verdict file to break the retry loop: `on_fail: loop` must not re-spend past an
+  absolute stop. The job transitions to `failed`; raising the budget and re-executing is the operator's
+  way forward.
+- A soft breach notifies and the attempt still stands — the work completed within the hard ceiling.
+- `BudgetError` (inverted limits, missing `usd`, unpriced usage) becomes the deterministic
+  `config_error` status — same policy as `guard_config`, recorded, never a silent $0 cost.
+- Cached refusal: an attempt whose `budget.json` already says `hard_exceeded` returns the cached failure
+  without re-running the adapter on resume; a human redo (`reset=True`) re-opens it.
+
+Dashboard: budget verdicts join guard notes as plain-language timeline rows
+(`⚠ Hard budget exceeded in stage 'build' ($6.01 ≥ $5.00)` as a red row; soft notes say
+"keeping going" with the stage still active).
+
+One declared test fix: the soft-case env knob was corrected to 1,597,500 input tokens — the burner's
+fixed 500 output tokens at $15/1M add $0.0075, so the attempt totals exactly $4.80 between the $4.00
+soft and $5.00 hard limits. No assertion semantics changed.
+
+### `1895f14` — doctor budget-integrity checks
+
+`doctor` verifies the budget system's invariants at boot, before any spend happens:
+
+- The `price_table` must validate against `price_table.schema.json` — **authoritative** (`ok=False`,
+  nothing can be priced with a corrupt table). Doctor re-reads `factory.json` from disk at check time:
+  it inspects the tree as it is, not the config snapshot taken at kernel init.
+- Every stage budget must pass `stage_limits()` — advisory warning echoing the runtime `BudgetError`
+  wording exactly, with the fix location appended (doctor and runtime speak the same words).
+- Usage pricing coverage, aggregated per job (attempts repeat the same usage shape; per-file findings
+  would flood the report): a model absent from the table is priced at the `default` tier when it exists
+  (advisory — estimates may be off, pin a dedicated tier) and fails deterministically when it does not;
+  a `*_tokens` metric whose rate the tier lacks fails at runtime, so doctor names it before the spend.
+
+Read-only and order-stable: jobs by path, then model names, then metric names.
+
+**Deviations recorded during P2.2** (documented here so HISTORY matches the tree):
+
+1. **Per-million price table kept** — the shipped `X_per_1m` rate structure (tier names + `default`
+   fallback) stayed instead of the initial per-token sketch (`llm_input_token: 0.000001`), matching
+   `factory.json` as shipped and `price_table.schema.json`.
+2. **Doctor wording uses the runtime vocabulary** — `soft_limit`/`hard_limit` (pinned tests +
+   `stage_limits()`'s error message), not the initial `soft_usd`/`usd` sketch.
+3. **Hard stop semantics** — a `hard_exceeded` budget transitions the job to `failed` (absolute stop,
+   spec §543, acceptance-gate invariant) rather than advancing to the next stage; the input `source of
+   truth` also pinned this via the committed `test_hard_budget_exceeded_fails_attempt_and_stops`.
+4. **Dashboard extension** — budget verdicts render as plain-language `_timeline` rows alongside guard
+   notes (soft: "keeping going", hard: red warning row); not in the original task list, declared for
+   the manual verification requirement.
+
+**Closing suite at `1895f14`:** **312 collected — 310 passed, 2 skipped** — fully green; flake8 clean;
+`factory doctor` reports ok on the real tree, no budget-config warnings (only honest advisories: the
+recorded fixture/demo jobs' models are priced at the `default` tier).
+
+---
+
+## Post-HEAD work (landed as `634ff41` and earlier)
 
 Performed by the documentation session (see [AI-PROVENANCE.md](AI-PROVENANCE.md)):
 
@@ -170,16 +268,16 @@ Performed by the documentation session (see [AI-PROVENANCE.md](AI-PROVENANCE.md)
   `development/`, `operations/`, plus `docs/context/` (this folder).
 - Added root `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`.
 - Moved the Specification v3.0 into `docs/specification/`.
-- Reconciled plan status with reality (P1 is largely implemented, not merely planned).
-
-These changes are uncommitted in the working tree at the time of writing.
+- Added the provenance tool, `.gitmessage`, `.githooks/commit-msg`, `.provenance-allow`, and the CI
+  workflows (`lint-and-test` plus a `provenance` job).
+- Reconciled plan status with reality (P1 is implemented, not merely planned).
 
 ---
 
-## Post-HEAD hardening sessions (2026-10-16, uncommitted)
+## Hardening sessions (2026-10-16, landed)
 
-Three working sessions extended the pinned HEAD `9398dfe`. All changes remain
-uncommitted in the working tree; test counts below are from the current suite.
+Three working sessions extended `9398dfe` before P2 began. Test counts below are from the suite **at the
+time of each session**; they are a record of growth, not current state.
 
 ### Session A — recovery, live backend, doc reconciliation
 - Fixed the `gitrepo.is_repo` parent-walk-up bug: a repo-less project nested in
@@ -252,10 +350,9 @@ uncommitted in the working tree; test counts below are from the current suite.
   dashboard renders `changed N%`. Different dimensions → no number.
 - Real-tree proof on genuine captures: identical rebuild → `0.0`
   everywhere; a real copy edit → `1.1%` desktop / `3.4%` mobile.
-- Tests +6: suite **242 collected — 240 passed, 2 skipped**; flake8 clean;
-  `doctor` ok.
-- Tests +12 (`tests/test_visual_capture.py`): suite **236 collected — 234
-  passed, 2 skipped**; flake8 clean; `doctor` ok.
+- Tests +6 (2 × explain, 4 × diff), plus the growing hermetic coverage in
+  `tests/test_visual_capture.py`. Suite after the session:
+  **242 collected — 240 passed, 2 skipped**; flake8 clean; `doctor` ok.
 
 ---
 
@@ -270,12 +367,15 @@ uncommitted in the working tree; test counts below are from the current suite.
 | `92b0b2a` (P1 checkpoints) | 154 / 156 |
 | `a3fde93` (P1 conformance) | 159 / 159 |
 | `5dfdf19` (P1 dashboard) | **171 / 173** (2 skipped) |
-| `9398dfe` (P1 worktrees/merge/undo, HEAD) | **203 / 205** (2 skipped) |
-| uncommitted (recovery + live backend, session A) | 212 / 214 (2 skipped) |
-| uncommitted (question budget + visual plumbing, session B) | 222 / 224 (2 skipped) |
-| uncommitted (real visual capture, session C) | 234 / 236 (2 skipped) |
-| uncommitted (explain + diff polish, session C2) | **240 / 242** (2 skipped) |
+| `9398dfe` (P1 worktrees/merge/undo) | **203 / 205** (2 skipped) |
+| session A (recovery + live backend) | 212 / 214 (2 skipped) |
+| session B (question budget + visual plumbing) | 222 / 224 (2 skipped) |
+| session C (real visual capture) | 234 / 236 (2 skipped) |
+| session C2 (explain + diff polish) | **240 / 242** (2 skipped) |
 | `9010e60` (P2.1 guards complete) | **284 / 286** (2 skipped) |
+| `634ff41` (docs reconciliation) | 284 / 286 (2 skipped) |
+| `9558498` (P2.2 schemas + red contracts) | 284 / 290 (6 red — TDD) |
+| `9948840` (P2.2 cost meter, **current HEAD**) | **305 / 312** (2 skipped, 5 red — the P2.2 wiring contracts) |
 
 ---
 
@@ -284,6 +384,11 @@ uncommitted in the working tree; test counts below are from the current suite.
 1. **Ordering discipline:** P0 invariants (atomicity, fencing, transitions, schemas) were finished and
    tested *before* any execution engine was added — exactly as the roadmap demands.
 2. **Test-first evidence:** each commit adds its own test module; the suite grew monotonically with features.
+   The one place the count dips is deliberate: P2.2 committed its failing contracts *before* the
+   implementation, so the tests specify the slice instead of describing it afterwards.
 3. **Spec-driven:** every commit message cites the specification section it implements (§5.2, §7, §9.2, §20.3, §21).
 4. **Schema changes are logged:** the `kernel/schemas/CHANGELOG.md` documents each change and its migration.
-5. **Single author, single day:** consistent authorship and timestamps suggest one focused build session per phase.
+5. **Two focused build days, one author:** 2026-10-16 delivered P0 and P1; 2026-10-17 delivered the P1
+   hardening, P2.1, and the start of P2.2. Authorship is a single human (`iDorgham`) throughout.
+6. **Dogfooding the provenance convention:** from P2.1 the project's own claim about how each change was
+   produced is machine-checkable rather than remembered — which is the whole thesis applied to itself.

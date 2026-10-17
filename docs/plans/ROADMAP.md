@@ -6,9 +6,13 @@ One engine, three presets (Solo / Team / Enterprise). Phases are ordered so that
 
 | Phase | Deliver | Status | Plan |
 |-------|---------|--------|------|
-| **P0 Kernel core** | `job.json` + `events.jsonl`, atomic writes, leases and fencing, schema validation, check runner, `factory doctor`, `factory reindex` | ✅ Implemented (236 collected: 234 passed, 2 skipped — shared suite) | [P0](P0-kernel-core.md) |
-| **P1 Solo slice** | `lite` profile execution, adapter runtime + build loop, checkpoints + SHA-bound approval, conformance suite, `factory serve` dashboard, git worktrees + merge queue + Undo, live `cli-agent` backend, question budget, real visual capture | ✅ Complete — 236 collected: 234 passed, 2 skipped; proven end-to-end | [P1](P1-solo-slice.md) |
-| **P2 Trust layer** | Budgets and metering, guards, sandbox hardening, injection handling, risk-scored gates, import with baseline verification | In progress (P2.1 guards landed) | [P2](P2-trust-layer.md) |
+| **P0 Kernel core** | `job.json` + `events.jsonl`, atomic writes, leases and fencing, schema validation, check runner, `factory doctor`, `factory reindex` | ✅ Implemented — invariants enforced and tested; snapshot repair and chain verification pass | [P0](P0-kernel-core.md) |
+| **P1 Solo slice** | `lite` profile execution, adapter runtime + build loop, checkpoints + SHA-bound approval, conformance suite, `factory serve` dashboard, git worktrees + merge queue + Undo, live `cli-agent` backend, question budget, real visual capture | ✅ Complete — proven end-to-end on the real tree | [P1](P1-solo-slice.md) |
+| **P2 Trust layer** | Budgets and metering, guards, sandbox hardening, injection handling, risk-scored gates, import with baseline verification | 🚧 In progress — P2.1 guards complete; **P2.2 budgets complete** (schemas, cost meter, engine enforcement, doctor checks); remaining: sandbox hardening, injection handling, risk-scored gates, import with baseline | [P2](P2-trust-layer.md) |
+
+The suite is **shared** across phases, so a per-phase test count is not meaningful on its own; the
+figure that matters is the current one: **312 collected — 310 passed, 2 skipped** at `1895f14`,
+fully green at the close of P2.2.
 | **P3 Learning** | Eval harness, skill packages and promotion, lessons ledger, repo map and memory | Planned | [P3](P3-learning.md) |
 | **P4 Team** | More adapters via conformance suite, epics and dependencies, visual baselines, named users and reviewer assignment | Planned | [P4](P4-team.md) |
 | **P5 Enterprise** | Control plane, RBAC, hash-chained audit and anchors, brand design systems with lint, compliance exports | Planned | [P5](P5-enterprise.md) |
@@ -17,6 +21,9 @@ One engine, three presets (Solo / Team / Enterprise). Phases are ordered so that
 
 1. Do not build P4 or P5 features before P0 is solid and P1 is demonstrably reliable.
 2. Every phase ends with the test suite green and `factory doctor` clean against a real tree.
+*Within* a phase, a slice may land TDD-red on purpose: the failing tests are the contract for the
+next slice, they are listed in the phase plan, and they must be green before the phase closes.
+(The P2.2 budget slice went through that state and closed green at `1895f14`.)
 3. New capabilities must default to off or to a zero-decision default in Solo mode.
 4. Each phase updates this table and its plan file's checklist as work lands.
 

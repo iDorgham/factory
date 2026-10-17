@@ -1,6 +1,8 @@
 # Enterprise AI Software Factory — Full Project Context
 
-> A portable briefing for any AI tool or model. Snapshot date: **2026-10-17** (reconciled against working tree: 286 tests collected, P2.1 guards machine-verified in code and commit history).
+> A portable briefing for any AI tool or model. Snapshot date: **2026-10-17**, commit `1895f14`
+> (reconciled against the working tree: **312 tests collected — 310 passed, 2 skipped, 0 failed** —
+> fully green at the close of P2.2).
 > Everything below is grounded in the repository. Where something is unknown, it is labeled as unknown.
 
 ---
@@ -16,10 +18,10 @@ Its core promise is **maximum *verified* automation, not maximum automation**. T
 with which it can say "this is actually done," not the number of agents it runs.
 
 The system is a **runnable reference implementation** of a canonical specification (v3.0). The specification
-is the source of truth for intended behavior; the code implements P0 (kernel core) fully and most of P1
-(Solo slice).
+is the source of truth for intended behavior; the code implements P0 (kernel core) and P1 (Solo slice)
+fully, plus P2.1 (guards) and P2.2 (budgets) within the trust layer.
 
-**Status right now:** P0 complete; **P1 Solo slice complete** (stage-graph engine, build loop, live `cli-agent` adapter, checkpoints, SHA-bound approval, worktrees + merge queue + Undo, question budget, and real visual capture via headless Edge/Chrome) — all proven end-to-end on the real tree.
+**Status right now:** P0 complete; **P1 Solo slice complete** (stage-graph engine, build loop, live `cli-agent` adapter, checkpoints, SHA-bound approval, worktrees + merge queue + Undo, question budget, and real visual capture via headless Edge/Chrome) — all proven end-to-end on the real tree; **P2.1 guards landed** (three deterministic diff guards, structural authorization, engine hook, dashboard verdicts, doctor integrity checks); **P2.2 budgets landed** (budget + price-table schemas, pure cost meter, engine enforcement — verdict file, breach events, hard stop, cached-refusal idempotency, dashboard verdict rows — and doctor integrity checks). Next head of the P2 queue: **sandbox hardening** (§12 gap #5) and **risk-scored gates** (§12 gap #6).
 
 ---
 
@@ -153,8 +155,9 @@ cancelled | superseded → archived
 | `conformance.py` | Adapter conformance suite (§20.3): start, contract-file, usage, write-boundary, injected-instruction, plus capability-gated cancel/resume/heartbeat. Records `conformance.json`. |
 | `dashboard.py` | `build_view` (three-element Solo view), `render_html`, `export_dashboard` (static snapshot), `serve` (stdlib HTTP server + SSE + `POST /api/command`), `dispatch`. |
 | `gitrepo.py` | Factory-managed git: per-project repo + `base_commit`, per-job worktree/branch, checkpoint commits, `--no-ff` merge queue (conflict → `blocked`), revert/reset Undo. |
-| `provenance.py` | Commit provenance trailer conventions (per `CONTRIBUTING.md` §3.1). |
-| `guards.py` | Pure deterministic diff guards (`no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff`) + registry, `GUARDS`; hard-fail on unknown id, exact-path structural `authorized()`. |
+| `provenance.py` | Commit provenance trailer conventions, build + verify (`factory provenance verify`), enforced per-commit since P2.1 by the commit-msg hook and CI. |
+| `guards.py` | Pure deterministic diff guards (`no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff`) + registry `GUARDS`; hard-fail on unknown id, exact-path structural `authorized()`. |
+| `budgets.py` | Pure deterministic cost calculation, limit checking, and fail-hard unpriced-usage enforcement: `calculate_cost` (price table × reported usage, any unpriced metered metric raises `BudgetError` — unpriced usage never silently costs $0), `stage_limits` (soft/hard resolution, `0.8 × usd` default soft, inverted limits raise), `check_budget` (inclusive boundaries). No I/O — the engine owns verdicts and events. |
 | `cli.py` | The `factory` command (see §9). |
 
 ---
@@ -166,17 +169,23 @@ factory/
 ├── factory.json                 # global config: price table, sandbox, budget defaults
 ├── factory                      # CLI launcher script
 ├── pyproject.toml               # packaging (factory-kernel 0.4.0) + pytest + flake8
+├── .githooks/ .gitmessage .provenance-allow   # provenance enforcement + grandfather list
+├── .github/workflows/           # CI: lint + test, and a provenance gate
+├── CHANGELOG.md CONTRIBUTING.md SECURITY.md   # repository-level entry points
 ├── kernel/
-│   ├── schemas/                 # event, job, project, context.manifest, authorizations + CHANGELOG
+│   ├── schemas/                 # event, job, project, context.manifest, authorizations,
+│   │                            #   budget, price_table (7) + CHANGELOG (schema migration log)
 │   ├── presets/                 # solo.json, team.json, enterprise.json
 │   ├── stages/                  # lite.yaml, standard.yaml
-│   └── src/factory_kernel/      # the Python reference kernel (20 modules)
-├── tests/                       # hermetic pytest suite (286 collected: 284 passed, 2 skipped)
-│   └── fixtures/adapters/slow/  # adapter fixture exercising cancel/resume/heartbeat
+│   └── src/factory_kernel/      # the Python reference kernel (21 .py files: 20 modules + package __init__)
+├── tests/                       # hermetic pytest suite (312 collected: 310 passed,
+│   │                            #   2 skipped — fully green after P2.2)
+│   └── fixtures/adapters/       # slow, fake-browser, cli-echo-agent, cli-ask-agent, budget-burner
 ├── roles/                       # markdown role contracts (5 starter: analyst, planner, builder, verifier, integrator)
 ├── adapters/echo/               # deterministic echo adapter (manifest.json, run.py, conformance.json)
 ├── adapters/cli-agent/          # generic CLI-agent shell-out adapter (FACTORY_CLI_AGENT_CMD; deterministic no-op by default)
-├── projects/<name>/             # runtime state: project.json, checks.json, memory/, jobs/
+├── adapters/visual-capture/     # NOT an adapter: stdlib headless Edge/Chrome capture producer (a check command)
+├── projects/<name>/             # runtime state: project.json, checks.json, repo/, memory/, jobs/
 ├── state/index.json             # derived, rebuildable
 ├── .work/<job-id>/              # isolated git worktrees on branch factory/<job-id>
 └── docs/                        # product / architecture / specification / plans / development / operations / context
@@ -238,11 +247,15 @@ factory job approve <job-id> [--adapter id] [--sha <checkpoint-sha>]
 factory job status <job-id>
 factory job list [--project p]
 factory job cancel <job-id> [--reason r]
+factory job undo <job-id>                                        # revert a completed merge (§21.2)
+factory job answer <job-id> <question-id> "<answer>" [--adapter id]  # answer a blocking question
 
-factory request-changes <job-id> "<feedback>"                     # "Change this…" from the approval card
+factory request-changes <job-id> "<feedback>" [--adapter id]     # "Change this…" from the approval card
 factory adapter test <adapter-id> [--no-record]                   # run conformance suite (§20.3)
 factory serve [--host --port --no-open]                           # live dashboard (SSE)
 factory export-dashboard [--out f.html] [--project p]             # static read-only snapshot
+factory provenance verify [--range r] [--require k] [--allow sha]  # check AI-Tool/AI-Model trailers
+                          [--all-before sha] [--allowlist f] [--json]
 factory doctor                                                     # verify + repair
 factory reindex                                                     # rebuild derived state
 ```
@@ -266,8 +279,8 @@ Root/actor overrides: `--root`, `--actor`.
 | Phase | Deliver | Status |
 |-------|---------|--------|
 | **P0 Kernel core** | events/snapshot, atomic writes, leases+fencing, schema validation, check runner, `doctor`, `reindex` | ✅ Complete |
-| **P1 Solo slice** | lite execution, adapter runtime, build loop, checkpoints + SHA-bound approval, conformance suite, dashboard | 🚧 **In progress — mostly implemented** |
-| **P2 Trust layer** | budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline | 🚧 **In progress — P2.1 guards landed** (diff collection, three deterministic guards, engine hook, plain-language dashboard verdicts, doctor integrity checks) |
+| **P1 Solo slice** | lite execution, adapter runtime, build loop, checkpoints + SHA-bound approval, conformance suite, dashboard, worktrees + merge/undo, question budget, real visual capture | ✅ Complete |
+| **P2 Trust layer** | budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline | 🚧 **In progress** — P2.1 guards landed (diff collection, three deterministic guards, engine hook, fingerprint feed, plain-language dashboard verdicts, doctor integrity checks); P2.2 budgets landed (schemas, pure cost meter, engine enforcement, doctor checks); remaining: sandbox hardening, risk-scored gates, import with baseline |
 | **P3 Learning** | eval harness, skill packages + promotion, lessons ledger, memory | ⬜ Planned |
 | **P4 Team** | more adapters via conformance, epics + dependencies, visual baselines, named users | ⬜ Planned |
 | **P5 Enterprise** | control plane, RBAC, hash-chained audit + anchors, brand design systems, compliance export | ⬜ Planned |
@@ -276,12 +289,11 @@ Root/actor overrides: `--root`, `--actor`.
 **Done (verified in code):** stage-graph engine + build loop; adapter runtime + echo + live cli-agent backend (NDJSON forwarding, honest failure classes, `resume`, recorded conformance); content-addressed
 checkpoints (+ git commit per checkpoint); SHA-bound approval (refuses changed results); `interrupted` attempt recovery + input-hash
 idempotency; adapter conformance suite (§20.3) + `factory adapter test`; Solo dashboard (`serve` live SSE
-+ `export-dashboard` static, with Approve / Change this… / Undo on the card); `request-changes` rework loop;
++ `export-dashboard` static, with Approve / Change this… / Undo / Explain this on the card); `request-changes` rework loop;
 factory-managed git worktrees + merge queue (conflict → `blocked`) + Undo (`merge.undone`).
 
-**Remaining (P1):** nothing in code. The `visual.json` contract plus a real capture producer
-(`adapters/visual-capture/capture.py`, headless Edge/Chrome, runtime theme probe) are landed; see
-`docs/plans/P1-solo-slice.md` — "Hardening 2026-10-16 (PM)" and "(evening)".
+**Remaining (P1):** nothing blocking. One open nicety: live-server preview capture (the contract and the
+real producer are landed; capturing a served URL rather than a file is not implemented).
 
 ---
 
@@ -291,23 +303,24 @@ factory-managed git worktrees + merge queue (conflict → `blocked`) + Undo (`me
 - **Packaging:** `factory-kernel` v0.4.0; console script `factory`.
 - **Run tests:** `pip install -e ".[dev]"` then `python -m pytest` and `python -m flake8 kernel/src tests`.
 - **Hermetic tests:** each test builds a throwaway factory tree in `tmp_path` from the real schemas/presets/stages.
-- **Source metrics:** 20 kernel modules (includes checkpoint, conformance, dashboard, gitrepo, provenance, guards); commit history carries `AI-Tool`/`AI-Model` provenance trailers per-commit since P2.1 (machine-verified by the commit-msg hook).
-- **Test count (verified 2026-10-17, working tree):** `286 collected — 284 passed, 2 skipped`. Test files: atomic, ulid, hashing, lease, state, transitions, profiles, schemas, kernel, doctor, engine, checks, context, adapters, cli-agent, checkpoint, conformance, dashboard, worktree (git/merge/undo/isolation), questions (Solo question budget), visual_capture (real capture producer + diffs), explain dispatched from dashboard, provenance, guards (P2.1: guard units, diff collection, engine hook, doctor authorizations).
+- **Source metrics:** 20 kernel modules (21 `.py` files — the 21st is the package `__init__`; the set incl. checkpoint, conformance, dashboard, gitrepo, provenance, guards, budgets); 7 schemas; commit history carries `AI-Tool`/`AI-Model` provenance trailers per-commit since P2.1 (machine-verified by the commit-msg hook and CI).
+- **Test count (verified 2026-10-17 at `1895f14`):** `312 collected — 310 passed, 2 skipped` — fully green, zero failures. Test files: atomic, ulid, hashing, lease, state, transitions, profiles, schemas, kernel, doctor, engine, checks, context, adapters, cli-agent, checkpoint, conformance, dashboard, worktree (git/merge/undo/isolation), questions (Solo question budget), visual_capture (real capture producer + diffs), explain (dispatched from the dashboard), provenance, guards (P2.1: guard units, diff collection, engine hook, doctor authorizations), budgets (P2.2: cost math, limits, schemas, engine hook, doctor budget checks).
 
 ---
 
 ## 12. Known gaps / open questions (good discussion material)
 
-1. **Worktree lifecycle (done, verify edge cases)** — `.work/<job-id>/` is now a real git worktree (`gitrepo.add_worktree`, branch `factory/<job-id>`). Open: port-range allocation, orphan/stale-base handling under concurrent jobs (P4).
-2. **Question budget open** — `echo`/`cli-agent` can emit `question` events but the engine never counts them; no ≤ 3 cap, no `blocked` on exhaustion, no dashboard surfacing (needs the schema migration noted in the P1 plan).
-3. **Guards not executed** — *closed 2026-10-17 (P2.1)*: `no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff` run per attempt over the diff from the attempt-base commit; violations fail the attempt, feed the fingerprint (repeat → stalled), land as hash-chained events, and are authorized structurally by per-job `authorizations.json` (exact paths, schema-validated). `scope_guard` and plan-file-set authorization remain future. **Budgets/metering (gap #4) is now the head of the P2 queue.**
-4. **Budgets declared but not enforced** — every stage has a `budget` in YAML, but there is no metering/stop yet (P2; next up).
-5. **Sandbox is config-only** — `factory.json` declares a sandbox, but no process/container isolation is implemented (P2).
+1. **Worktree lifecycle (done, verify edge cases)** — `.work/<job-id>/` is a real git worktree (`gitrepo.add_worktree`, branch `factory/<job-id>`). Open: port-range allocation, orphan/stale-base handling under concurrent jobs (P4).
+2. ~~**Question budget open**~~ — *closed 2026-10-16 (P1)*: `echo`/`cli-agent` `question` events are persisted as `job.question_asked`, deduped by id/normalized text, capped at 3 blocking questions per job, park the job `blocked`, fail the job honestly when exhausted, and surface on the dashboard card with option buttons and a free-text box. Both sides reach future attempts through `questions.md` in the context manifest.
+3. **Guards not executed** — *closed 2026-10-17 (P2.1)*: `no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff` run per attempt over the diff from the attempt-base commit; violations fail the attempt, feed the fingerprint (repeat → stalled), land as hash-chained events, and are authorized structurally by per-job `authorizations.json` (exact paths, schema-validated). `scope_guard` and plan-file-set authorization remain future.
+4. ~~**Budgets not enforced**~~ — *closed 2026-10-17 (P2.2)*: `budgets.py` (pure cost meter: `calculate_cost` prices every `X_tokens` metric at the tier's `X_per_1m` rate; unpriced usage raises `BudgetError` — nothing silently costs $0), `engine._run_budget` (verdict into `budget.json` each budgeted round; `budget.soft_exceeded` notifies while the work stands, `budget.hard_exceeded` fails the attempt and stops the retry loop; job → `failed` as an absolute stop per §543; a cached hard refusal is returned on resume without re-spending), and doctor (price-table schema validity is authoritative; inverted soft/hard limits and unpriced usage are advisories naming the fix). Per-attempt cost stays in `budget.json`; no per-attempt timeline noise. Remaining budget scope (future): budgets at job/project scope, pre-job cost estimates, cost reports, mid-run cut-off.
+5. **Sandbox is config-only** — `factory.json` declares a sandbox, but no process/container isolation is implemented (P2). Agents run with your privileges.
 6. **No risk scoring** — `verify` declares `gate: risk_scored`, but the score computation is absent (P2).
 7. Undo/merge — done (`gitrepo.merge_branch`/`revert_merge`, `kernel._merge_on_complete`/`job_undo`, conflict → `blocked`, `merge.undone`; dashboard Undo enabled when a merge is present).
 8. **Schema versioning is interim** — schemas have no `$id` version yet; `kernel/schemas/CHANGELOG.md` is the interim record.
-9. **Roles incomplete** — spec defines 8 roles; only 5 exist (analyst, planner, builder, verifier, integrator); reviewer/designer/architect/curator are missing.
+9. **Roles incomplete** — the spec defines 8 roles; only 5 exist (analyst, planner, builder, verifier, integrator); reviewer/designer/architect/curator are missing (P3/P4).
 10. **Dashboard scope** — currently Solo three-element; Team/Enterprise panels are future.
+11. **No LICENSE file** and no upstream git remote — worth resolving before distributing or hosting the repository.
 
 ---
 
@@ -316,9 +329,9 @@ factory-managed git worktrees + merge queue (conflict → `blocked`) + Undo (`me
 Use these to get high-value reasoning from another model:
 
 - "Here is the architecture (§5). Which invariants are most fragile, and what tests would harden them?"
-- "Visual capture uses headless Chromium with a runtime theme probe. Where exactly should visual-diff thresholds gate the `verify` stage, and what baseline-management flow keeps them deterministic?"
-- "The profiles declare guards and budgets that aren't enforced yet (§12). Sketch the enforcement design for P2."
-- "Review the build loop's no-progress detection (failure fingerprint → stalled). What failure modes would evade it?"
+- "Guards (§12 gap #3) and cost math (§12 gap #4) are implemented as pure kernel functions while their runtime wiring is not. What is the safest order to close the gap, and where could a partial integration create a false sense of enforcement?"
+- "Visual capture uses headless Chromium with a runtime theme probe, and `changed_pct` diffs against the previous attempt. Where exactly should visual-diff thresholds gate the `verify` stage, and what baseline-management flow keeps them deterministic across machines?"
+- "Review the build loop's no-progress detection (failure fingerprint → stalled), which now also absorbs guard violations. What failure modes would still evade it?"
 - "The conformance suite runs cancel/resume/heartbeat only when the adapter declares the capability. Is graceful degradation the right call, or should these be mandatory?"
 - "Where does the implementation diverge from the specification's promises? List concrete gaps."
 - "Propose a risk-score computation (signals → score bands → gate actions) that is deterministic and hard to game."
@@ -328,10 +341,11 @@ Use these to get high-value reasoning from another model:
 ## 14. Provenance
 
 **Tool and model:** P0 and P1 were developed with **OpenCode** using the **Big Pickle** model (provider
-`opencode`). This is owner-attested; the git history itself carries no tool/model trailers, so it is
-recorded as attestation rather than machine-verified proof. The documentation set was also authored with
-OpenCode + Big Pickle. See **[AI-PROVENANCE.md](AI-PROVENANCE.md)** for the per-phase table and how to
-capture provenance going forward.
+`opencode`) — that part is **owner-attested**, because those commits predate the provenance convention.
+Since P2.1 (`f5815b9`) every commit carries `AI-Tool` / `AI-Model` trailers, so the tool/model claim for
+P2 is **machine-verified** by git: the `commit-msg` hook and the CI provenance job both refuse a commit
+without them, and `factory provenance verify` audits the history. See
+**[AI-PROVENANCE.md](AI-PROVENANCE.md)** for the per-phase table and the convention itself.
 
 ---
 
