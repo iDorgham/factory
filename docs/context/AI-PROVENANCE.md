@@ -45,7 +45,8 @@ So every phase of code in the repository (P0 and all of P1) was produced with th
 | **Documentation** | (uncommitted) | `docs/` tree, root CHANGELOG/CONTRIBUTING/SECURITY, context pack, provenance tool + CI | OpenCode | Big Pickle | Self-observed |
 | **P2 Trust layer** (1 — guards) | `f5815b9`, `741bf84`, `12f231f`, `42b8ae6`, `8f2e8de`, `9010e60` | Guards over the diff: authorizations schema, `gitrepo.collect_diff`, three deterministic guards (`no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff`), engine hook (attempt-base diff, events, fingerprint feed, stall on repeat), plain-language dashboard verdicts, doctor integrity checks | OpenCode | GLM-5.3-Flash Free (provider `opencode`) | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
 | **P2.2 Budgets and metering** | `9558498`, `9948840`, `08980ed`, `1895f14` | `budget`/`price_table` schemas + TDD-red contracts, pure cost meter (`calculate_cost`, `stage_limits`, `check_budget`), engine enforcement (verdict file, soft/hard breach events, hard stop, cached-refusal idempotency, dashboard verdict rows), doctor budget-integrity checks | OpenCode | GLM-5.3-Flash Free (provider `opencode`) | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
-| **P2 Trust layer** (remaining) | — | Sandbox hardening, prompt-injection handling, risk-scored gates, import with baseline verification | not started | not started | — |
+| **P2.3 Sandbox hardening** | `8348af8`, `408c538`, `b3696c6` | `factory.schema.json` (first global-config schema) + hardened `factory.json` + TDD-red contracts, pure `sandbox.py` (`sanitize_env`, `resolve_under`, fail-hard policy parsing), sandboxed engine wiring (sanitized env, kernel-reserved `FACTORY_*` attribution, `strict_cwd` worktree lock, lexical path containment), doctor sandbox-integrity checks | OpenCode | GLM-5.3-Flash Free (provider `opencode`) | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
+| **P2 Trust layer** (remaining) | — | Prompt-injection handling, risk-scored gates, import with baseline verification | not started | not started | — |
 | **P3 Learning** | — | Eval harness, skills, lessons, memory | not started | not started | — |
 | **P4 Team** | — | Multi-adapter, epics, visual baselines, named users | not started | not started | — |
 | **P5 Enterprise** | — | Control plane, RBAC, audit chain, brands, compliance | not started | not started | — |
@@ -55,8 +56,9 @@ convention). **P2 is the first phase with machine-verified provenance:** every c
 carries `AI-Tool`/`AI-Model` trailers that the repo's commit-msg hook refuses to merge without and that
 CI checks on every push (`docs/development/CONTRIBUTING.md` §3.1), so the tool/model claim is checked by
 git itself, not by memory. `factory provenance verify` makes the same check available to anyone who
-clones the repository. **P2.2 continues that story unchanged:** four code commits, the same trailers,
-the same hook — the machine-verified story established with P2.1 is now the steady state.
+clones the repository. Every code commit since `f5815b9` — the P2.1 guards, the P2.2 budgets, and the
+P2.3 sandbox — carries the same trailers under the same hook: the machine-verified story established
+with P2.1 is the steady state.
 
 ---
 

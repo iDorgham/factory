@@ -1,7 +1,7 @@
 # Design & Architecture — Enterprise AI Software Factory
 
 **Version:** 3.0
-**Status:** Matches the reference implementation at `9948840` — P0 and P1 complete, P2.1 guards landed, P2.2 budget meter landed with engine/doctor wiring in flight. Claims below that describe *target* behavior are marked as such.
+**Status:** Matches the reference implementation at `b3696c6` — P0 and P1 complete, P2.1 guards landed, P2.2 budgets landed, P2.3 sandbox hardening landed. Claims below that describe *target* behavior are marked as such.
 **Related:** [Specification v3.0](<../specification/Enterprise AI Software Factory — Specification v3.0.md>) · [PRD](../product/PRD.md) · [Roadmap](../plans/ROADMAP.md)
 
 > Files are the protocol. Events are the truth. A small kernel enforces. Agents only propose.
@@ -172,9 +172,11 @@ Before every attempt the kernel writes `context.manifest.json` with a token budg
 **Safety floor (spec target; enforced today to the degree marked below):** human gate for irreversible
 external effects ✅ (the `approve` stage is `gate: required`; note every `lite` stage is currently
 `effects: local`, so the external-effect path is unexercised) · no secrets in agent env/context/files
-⚠️ (diff secret scanning is implemented by `no_secret_in_diff`; env and artifact handling is P2 work) ·
-destructive ops outside the worktree blocked ❌ (P2) · hard budget caps ⚠️ (cost arithmetic implemented
-in `budgets.py`, runtime enforcement in flight) · audit events always written ✅ for the event types
+⚠️ (diff secret scanning is implemented by `no_secret_in_diff`, and the agent env is sanitized to the
+`factory.json` allowlist with kernel-injected `FACTORY_*` attribution since P2.3; artifact scrubbing
+is P2 work) ·
+destructive ops outside the worktree blocked ❌ (P2) · hard budget caps ✅ (implemented and enforced
+since P2.2: verdict per attempt, breach events, absolute hard stop) · audit events always written ✅ for the event types
 that exist · agents cannot edit policy/budget/role/kernel files ✅ by construction (the write path is
 closed to agents).
 
@@ -218,10 +220,10 @@ Files plus a single-host kernel comfortably handle hundreds of active jobs per p
 
 ---
 
-## Appendix — implemented vs. target at `9948840`
+## Appendix — implemented vs. target at `b3696c6`
 
-The suite is **312 collected — 305 passed, 2 skipped, 5 failed**; the 5 failures are the deliberately
-red contracts for the P2.2 budget engine/doctor wiring.
+The suite is **343 collected — 341 passed, 2 skipped, 0 failed** — fully green at the close of P2.3
+(the 2 skips are capability-gated conformance cases).
 
 | Capability | State |
 |------------|-------|
@@ -233,8 +235,8 @@ red contracts for the P2.2 budget engine/doctor wiring.
 | Solo question budget, real visual capture, visual diff `changed_pct` | ✅ implemented, tested |
 | Guards: `no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff` | ✅ implemented (40 cases) |
 | Guards: `no_check_tampering`, `scope_guard` | ❌ not implemented (P2) |
-| Budget cost meter + schemas | ✅ implemented (24 cases); engine/doctor wiring **red** |
-| Sandbox isolation | ❌ config only — no process/container enforcement |
+| Budget cost meter + schemas | ✅ implemented (24 cases): pricing, limits, engine enforcement (verdict file, breach events, hard stop), doctor checks |
+| Sandbox: env sanitization, lexical path containment, worktree-locked adapter cwd, doctor integrity | ✅ implemented (27 cases); container isolation and network/resource-limit enforcement are not yet |
 | Risk-scored gates | ❌ stages declare `gate: risk_scored`; no score exists |
 | Skill packages, evals, lessons, memory compounding | ❌ P3 |
 | RBAC, hash-chained audit + anchors, brands, compliance export | ❌ P5 |

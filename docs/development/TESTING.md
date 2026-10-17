@@ -34,13 +34,10 @@ Use these fixtures rather than reimplementing setup.
 
 ## 3. Current coverage map
 
-**312 collected** at `9948840`: **305 passed, 2 skipped, 5 failed**. The 5 failures are the
-deliberately-red contracts for P2.2 budget enforcement, which was sliced into four steps and is landing
-one at a time — at `9948840` they are 2 engine cases (a budget verdict must fail the attempt and stop the
-stage's retry loop) and 3 `doctor` cases (`test_budgets.py::TestDoctorBudgetConfig`: soft ≥ hard, unpriced
-usage, invalid price table). As each slice lands, its cases turn green and the remaining red ones are the
-next step's contract. They are not regressions; see
-[TDD-red slices](#4-tdd-red-slices-are-a-technique-not-an-accident).
+**343 collected** at `b3696c6` (the close of P2.3): **341 passed, 2 skipped, 0 failed** — fully green.
+The 2 skips are capability-gated conformance cases, not red contracts. If the suite is red on your
+checkout of an in-progress slice, the failing test names are the next step's written contract, not
+regressions; see [TDD-red slices](#4-tdd-red-slices-are-a-technique-not-an-accident).
 
 | Module | Test file | Cases | Focus |
 |--------|-----------|-------|-------|
@@ -67,12 +64,14 @@ next step's contract. They are not regressions; see
 | `visual-capture` | `test_visual_capture.py` | 16 | real producer (fake browser), theme probe, manifest, `changed_pct` |
 | `guards.py` | `test_guards.py` | 40 | each guard, structural authorization, diff collection, engine hook, doctor authorizations |
 | `budgets.py` | `test_budgets.py` | 24 | pricing, unpriced-usage error, soft/hard resolution, inclusive boundaries |
+| `sandbox.py` | `test_sandbox.py` | 27 | schema validation, env sanitization, path containment, policy parsing, subprocess cwd/env contract, sandboxed engine run, doctor sandbox checks |
 | `provenance.py` | `test_provenance.py` | 23 | trailer detection, grandfathering, allowlist, CLI |
 
 Fixtures live in `tests/fixtures/adapters/`: `slow` (cancel/resume/heartbeat), `fake-browser.py`
 (a stdlib headless-browser shim with a theme mapping *inverted* relative to the dev Edge, so the
 runtime probe is genuinely exercised), `cli-echo-agent.py`, `cli-ask-agent.py` (ask modes), and
-`budget-burner`.
+`budget-burner`, and `env-probe` (P2.3: reports the environment it can see and its cwd inside the
+subprocess — kernel-recorded evidence for the sandbox tests).
 
 ## 4. TDD-red slices are a technique, not an accident
 

@@ -35,10 +35,10 @@ floor always remains.
 | Threat | Mitigation | State |
 |--------|-----------|-------|
 | **Prompt injection** via issues, READMEs, web pages, dependencies, or imported repos | Untrusted content is wrapped and labeled as data in the context manifest; sensitive actions require kernel-evaluated gates, not agent judgment | ⚠️ The conformance suite carries an injected-instruction case and the kernel gate is real; systematic wrapping is P2 |
-| **Secret exfiltration** | `no_secret_in_diff` scans added lines on every attempt; env/artifact scrubbing and an egress allowlist are specified | ⚠️ Diff scanning ✅ · scrubbing ❌ · egress allowlist ❌ |
+| **Secret exfiltration** | `no_secret_in_diff` scans added lines on every attempt; env/artifact scrubbing and an egress allowlist are specified | ⚠️ Diff scanning ✅ · agent-env allowlist ✅ (P2.3: only the sanitized env reaches adapter subprocesses) · artifact scrubbing ❌ · egress allowlist ❌ |
 | **Malicious / typosquatted dependencies** | `no_lockfile_surprise` forces a manifest and its lockfile to move together; new packages are meant to raise the risk score | ⚠️ Guard ✅ · install-script disabling ❌ · risk scoring ❌ |
 | **Test tampering** | `no_test_deletion` fails the attempt on deletion of test-shaped files unless authorized by exact path | ✅ for deletion · ❌ for skipping/weakening tests and for check-config tampering (`no_check_tampering` is not implemented) |
-| **Runaway cost** | Per-attempt usage reporting with per-tier pricing and stage soft/hard budgets | ⚠️ Metering ✅ · enforcement ❌ (P2.2 in flight) |
+| **Runaway cost** | Per-attempt usage reporting with per-tier pricing and stage soft/hard budgets | ⚠️ Metering ✅ · enforcement ✅ (verdict per attempt, absolute hard stop, since P2.2) · job/project scope ✗ |
 | **Privilege escalation through skills** | Skills are meant to carry no permissions of their own | ❌ P3 — no skill packages exist yet |
 | **Audit tampering** | The event log is hash-chained (`prev`) and `doctor` verifies the chain end to end; external anchors are specified | ✅ chain + verification · ❌ external anchors (P5) |
 
@@ -54,14 +54,27 @@ itself. That distinction is the point: an agent cannot talk its way past them.
 
 ## 5. Sandbox expectations
 
-> **Current state: not enforced.** `factory.json` declares a `sandbox` block (type `process`, a network
-> allowlist, CPU/memory/disk limits), but no process or container isolation is implemented. **Agents run
-> with the privileges of the user who started the kernel.** Treat the declared sandbox as intent, not as a
-> protection, and do not rely on it in a threat model until this section says otherwise.
+> **Current state: process sandbox enforced for adapter subprocesses (P2.3).** `factory.json` declares
+> the `sandbox` block, the kernel validates it against `factory.schema.json` (schema-invalid config is
+> a hard error), and **every adapter subprocess runs with a sanitized environment** (only the
+> `env_allowlist` intersection of the kernel env survives — provider tokens, SSH agents, proxies are
+> dropped unless explicitly allowlisted) plus kernel-reserved `FACTORY_*` attribution it cannot spoof.
+> With `strict_cwd: true` the adapter process is started inside the job worktree, and the sandbox paths
+> are proven contained before any subprocess sees them; a detected path escape fails the attempt as
+> `fatal`. `factory doctor` verifies this at boot: whole-config schema validity is authoritative, and the
+> `"*"` allowlist / loose `strict_cwd` trade-offs are named as advisories.
+>
+> **Still declared-but-not-enforced:** the `network_allowlist` and `resource_limits` keys, filesystem
+> isolation beyond the kernel-owned paths, container isolation, and secrets scrubbing from logs and
+> artifacts. A sandboxed adapter process still runs with the OS privileges of the user who started
+> the kernel — a shell inside the worktree is confined by policy, not by an OS sandbox. Treat those
+> residual surfaces as intent, not as protection, until this section says otherwise.
 
 The target behaviour (P2, workstream 3) is: agents and checks run with a filesystem limited to the job
 worktree and temp directories, a network allowlist, resource limits, and no inherited environment
-variables beyond an explicit list.
+variables beyond an explicit list — the env half landed in P2.3 (declared boundary: kernel-owned
+project checks keep the full host env, because operator tooling such as git/pytest often needs
+credentials).
 
 - Solo mode should use the lightest sandbox the host supports: a container if available, otherwise a restricted process with a command allowlist.
 - The active protections must be **stated plainly** and shown in the dashboard's sandbox status — no implied protection that isn't active. The rule exists so that operators are never misled about what is running.

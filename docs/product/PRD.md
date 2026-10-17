@@ -132,7 +132,8 @@ Hosted multi-tenant control plane, non-software agent orchestration, guaranteed 
 ## 8. Release phases
 
 See [Roadmap](../plans/ROADMAP.md). Summary: P0 kernel core (**done**) → P1 solo slice (**done**, proven
-end to end) → P2 trust layer (**in progress**: guards landed, budgets in flight) → P3 learning → P4 team →
+end to end) → P2 trust layer (**in progress**: guards, budgets, and sandbox hardening landed; injection
+handling, risk-scored gates, and import with baseline remain) → P3 learning → P4 team →
 P5 enterprise. P4/P5 features must not be built before P0 is solid and P1 is demonstrably reliable.
 
 > **Status discipline.** Where a requirement above is implemented, it is implemented in the kernel and

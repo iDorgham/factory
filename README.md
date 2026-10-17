@@ -6,8 +6,8 @@ orchestrating coding agents it does not trust.**
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![Specification](https://img.shields.io/badge/specification-v3.0-6F42C1)](docs/specification/Enterprise%20AI%20Software%20Factory%20%E2%80%94%20Specification%20v3.0.md)
 [![Phase](https://img.shields.io/badge/phase-P2%20trust%20layer-in%20progress-orange)](docs/plans/ROADMAP.md)
-[![Tests](https://img.shields.io/badge/tests-312%20collected-007ec6)](docs/development/TESTING.md)
-[![Kernel modules](https://img.shields.io/badge/kernel-20%20modules-007ec6)](docs/architecture/ARCHITECTURE.md)
+[![Tests](https://img.shields.io/badge/tests-343%20collected-007ec6)](docs/development/TESTING.md)
+[![Kernel modules](https://img.shields.io/badge/kernel-21%20modules-007ec6)](docs/architecture/ARCHITECTURE.md)
 [![Runtime deps](https://img.shields.io/badge/runtime%20dependencies-2-blueviolet)](pyproject.toml)
 
 **Files are the protocol. Events are the truth. A small kernel enforces. Agents only propose.**

@@ -260,6 +260,80 @@ recorded fixture/demo jobs' models are priced at the `default` tier).
 
 ---
 
+## P2.3 — Sandbox hardening (2026-10-17)
+
+### `8348af8` — the schema and TDD contracts (red)
+
+Registered the `factory` kind in `SchemaStore` and committed the project's first global-config schema,
+`factory.schema.json`, validating the whole `factory.json` (`additionalProperties: false`; sandbox
+`type` enum is `["process"]` until containers land). The shipped `factory.json` gained its hardening
+block (`env_allowlist` + `strict_cwd: true`). `tests/test_sandbox.py` pinned the contracts red:
+schema validation, `sanitize_env`, `resolve_under`, policy parsing, the `Adapter.run`
+cwd/env subprocess contract, and one end-to-end engine case. Plus `tests/fixtures/adapters/env-probe/`,
+an instrument whose `usage.json` records what environment it could *see* and its cwd inside the
+subprocess — the kernel records those claims verbatim in its own job dirs, so probe results are
+kernel-observed evidence, not adapter self-attestation.
+
+### `408c538` — pure `sandbox.py` and the sandboxed engine wiring
+
+`sandbox.py` is pure — no subprocess, no file I/O:
+
+- `sanitize_env` keeps exactly the allowlist intersection of the env. Matching is case-insensitive on
+  both sides (Windows env is case-insensitive; determinism beats platform drift); a rule without `*`
+  is an exact name (`PATH` never keeps `PATH_TOKEN`), a `*`-suffix rule is a prefix, and the lone
+  `"*"` is the explicit allow-all opt-out, documented as the foot-gun it is. Output preserves input
+  order and values verbatim.
+- `resolve_under` is lexical path containment: relative paths root at the base, absolute paths must
+  already sit inside it, and any `..` escape raises `SandboxError` — computed by pure string math
+  (`normpath` + platform `normcase`), with no filesystem access. Symlink resolution is deliberately
+  not performed and documented as a limitation.
+- `load_sandbox_policy` / `SandboxPolicy.from_config` fail hard: unknown type, empty allowlist, or
+  malformed keys raise instead of guessing. Missing keys fall to documented defaults — a built-in
+  allowlist of process essentials (`PATH`, Windows `SYSTEMROOT`/`SYSTEMDRIVE`, home, temp, and the
+  kernel-reserved `FACTORY_*`) and `strict_cwd: false` for legacy back-compat.
+
+Wiring: `Adapter.run` gained explicit `cwd`/`env` (defaults preserve the pre-sandbox behavior the
+operator-side conformance harness uses — a trusted tool run by the operator). `engine._invoke_adapter`
+now runs **every** adapter sandboxed: the env is the sanitized `os.environ` with kernel-reserved
+attribution injected **after** the filter (`FACTORY_JOB_ID`, `FACTORY_STAGE`, `FACTORY_ATTEMPT`,
+`FACTORY_ATTEMPT_DIR`, `FACTORY_WORKTREE` — the kernel owns that namespace and overrides any operator
+value under it), `strict_cwd` locks the adapter process into the job worktree, and both paths handed
+to the subprocess are proven contained in the factory root (`resolve_under`) before anything can see
+them; a `SandboxError` fails the adapter run as `fatal`, the same deterministic policy as
+`AdapterError`/`BudgetError`/`GuardError`.
+
+**Deviations recorded during P2.3** (my own Step 2 test bugs, fixed and declared — no assertion
+semantics changed): the `sanitize_env` expectation now keeps the kernel-reserved `FACTORY_JOB_ID`
+alongside `PATH` (the test forgot the `FACTORY_*` rule it had itself configured); the
+`AdapterSubprocess` test doubles mimic `CompletedProcess` (they returned `RunResult`, which has no
+`stdout` for the NDJSON parser); the env-probe fixture also probes `FACTORY_JOB_ID` and
+`FACTORY_ATTEMPT_DIR`, matching the manual verification checklist.
+
+**Declared boundary:** project checks (`checks.run_one`) keep their full env — kernel-owned commands
+run by the operator's own tooling are a separate concern from the agent sandbox, and their tools
+(often `git`, node toolchains, pytest) need credentials to function; revisiting that is a later slice.
+
+### `b3696c6` — doctor sandbox-integrity checks
+
+Doctor verifies the sandbox system's invariants at boot, before any adapter runs under it (re-reading
+`factory.json` from disk at check time, matching the budget convention):
+
+- The whole config must validate against `factory.schema.json` — **authoritative** (`ok=False`): a
+  corrupt config means the kernel cannot know which sandbox policy it is enforcing.
+- `env_allowlist` containing `"*"` — advisory: a valid explicit opt-out, but it disables the primary
+  security benefit of the sandbox (secret stripping), so doctor names it plainly.
+- `strict_cwd` absent or false — advisory: legacy behavior is valid, but adapter processes then start
+  outside the job worktree, which weakens isolation; the two states are worded distinctly.
+
+Read-only and order-stable.
+
+**Closing suite at `b3696c6`:** **343 collected — 341 passed, 2 skipped** — fully green; flake8 clean;
+`factory doctor` reports ok on the real tree with no sandbox warnings; the manual env-probe run
+confirmed the three sandbox facts end-to-end (secrets invisible, `FACTORY_*` attribution visible,
+adapter cwd = the job worktree).
+
+---
+
 ## Post-HEAD work (landed as `634ff41` and earlier)
 
 Performed by the documentation session (see [AI-PROVENANCE.md](AI-PROVENANCE.md)):

@@ -1,7 +1,7 @@
 # P2 — Trust Layer Plan
 
 **Phase:** P2
-**Status:** 🚧 In progress (P2.1 guards landed 2026-10-17; **P2.2 budgets landed 2026-10-17** — schemas, cost meter, engine enforcement, doctor checks, suite fully green. Next: sandbox hardening, risk-scored gates, import with baseline)
+**Status:** 🚧 In progress (P2.1 guards landed 2026-10-17; **P2.2 budgets landed 2026-10-17** — schemas, cost meter, engine enforcement, doctor checks, suite fully green; **P2.3 sandbox hardening landed 2026-10-17** — global-config schema, pure sanitization/containment, sandboxed adapter invocation, doctor checks. Next: risk-scored gates, prompt-injection handling, import with baseline)
 **Goal:** Make it safe to leave running: budgets enforced, anti-cheating guards active, sandbox hardened, risk-scored gates in place, and honest baselines on import.
 
 **Depends on:** [P1](P1-solo-slice.md) demonstrably reliable.
@@ -44,10 +44,13 @@ malformed authorization file into a recorded violation instead of a silent skip,
 and `doctor` checks for guard-id integrity plus authorization validity.
 
 ### 3. Sandbox hardening
-- [ ] Filesystem limited to job worktree + temp; network egress allowlist; resource limits; no inherited env beyond an explicit list
-      *(declared in `factory.json`; **not enforced** — no process or container isolation exists yet)*
+*Status: env/paths enforcement landed (P2.3, 2026-10-17). Remaining rows below are container/network/resource scope.*
+- [x] No inherited env beyond an explicit list; adapter cwd confined to the job worktree *(P2.3: `sanitize_env` strips the kernel env to the `factory.json` allowlist — case-insensitive exact or `*`-suffix rules, lone `*` explicit opt-out — plus kernel-reserved `FACTORY_*` attribution injected after the filter; `strict_cwd` locks the adapter process into the job worktree; `resolve_under` proves sandbox paths lexically contained and `load_sandbox_policy` fails hard on bad config; doctor verifies schema validity as authoritative and names the `"*"`/loose-`strict_cwd` trade-offs. Filesystem limits beyond the worktree stay kernel-owned paths; network egress and resource limits remain config-declared, not enforced.)*
 - [ ] Container if available; otherwise restricted process with command allowlist — and the dashboard states plainly which protections are active
-- [ ] Secrets in host store/env only; injected only into whitelisted commands; scrubbed from logs and artifacts
+- [ ] Secrets in host store/env only; injected only into whitelisted commands; scrubbed from logs and artifacts *(P2.3 covers the env half: secrets never reach the adapter subprocess at all unless allowlisted; out of scope: host store injection, log/artifact scrubbing)*
+
+*(The sandbox TDD-red cases from `8348af8` are resolved — the suite is fully green at `b3696c6`:
+343 collected — 341 passed, 2 skipped.)*
 
 ### 4. Risk-scored gates
 - [ ] Risk score from deterministic signals: diff size, sensitive paths, new dependencies, scope drift, external effects, history, skill maturity
@@ -75,7 +78,7 @@ and `doctor` checks for guard-id integrity plus authorization validity.
 
 ## Exit criteria
 
-- No job exceeds its hard budget; every job's cost is visible (spec success criterion #4). — *not met yet: the meter is implemented and tested, the enforcing runtime is not*
+- No job exceeds its hard budget; every job's cost is visible (spec success criterion #4). — *met: enforced since P2.2 (`budget.json` verdict per attempt, breach events, hard stop breaks the retry loop, job → `failed` as an absolute stop)*
 - Guards catch test deletion, check tampering, and lockfile surprises in tests. — *partially met: deletion and lockfile pairing have tests; `no_check_tampering` does not exist*
 - An injected-instruction fixture does not cause a gated action.
 - Imported projects report an honest baseline including pre-existing failures.

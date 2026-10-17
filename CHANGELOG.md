@@ -8,13 +8,40 @@ roadmap phase it belongs to so the history stays readable against [the roadmap](
 
 ## [Unreleased]
 
-> **Phase status:** P0 complete · P1 complete · **P2.1 guards landed** · **P2.2 budgets in flight**.
-> Suite at `9948840`: **312 collected — 305 passed, 2 skipped, 5 failed**. The 5 failures are the
-> intentionally-red TDD contracts for the P2.2 budget wiring (engine step 3, `doctor` step 4), which the
-> slices below specify; each slice's cases turn green as it lands.
+> **Phase status:** P0 complete · P1 complete · **P2.1 guards landed** · **P2.2 budgets landed** ·
+> **P2.3 sandbox hardening landed**. Suite at `b3696c6`: **343 collected — 341 passed, 2 skipped,
+> 0 failed** — fully green (the 2 skips are capability-gated conformance cases).
 
 ### Added
 
+- **Sandbox hardening (P2.3)** — the adapter boundary is enforced, not just declared:
+  - `kernel/schemas/factory.schema.json` — the first global-config schema, validating the whole
+    `factory.json` (`additionalProperties: false`); the shipped config gained its hardening block.
+    Migration: none — new document; logged in `kernel/schemas/CHANGELOG.md`.
+  - `kernel/src/factory_kernel/sandbox.py`, a pure module (no subprocess, no file I/O):
+    `sanitize_env` keeps exactly the allowlist intersection of the kernel env (case-insensitive exact
+    / `*`-suffix rules, lone `*` as the explicit allow-all opt-out); `resolve_under` rejects lexical
+    path escapes; `load_sandbox_policy` fails hard on unknown types, empty allowlists, and malformed
+    keys, with documented defaults for absent ones.
+  - Sandboxed adapter execution: `Adapter.run` accepts explicit `cwd`/`env`; `engine._invoke_adapter`
+    runs every adapter sandboxed — sanitized env plus kernel-reserved attribution injected after the
+    filter (`FACTORY_JOB_ID`, `FACTORY_STAGE`, `FACTORY_ATTEMPT`, `FACTORY_ATTEMPT_DIR`,
+    `FACTORY_WORKTREE`), `strict_cwd` locking adapter cwd to the job worktree, and both sandbox paths
+    proven contained before any subprocess sees them (`SandboxError` → `fatal`). Declared boundary:
+    kernel-owned project checks keep their full env (operator tooling needs credentials).
+  - `factory doctor` sandbox-integrity checks: whole-config schema validity is authoritative;
+    `env_allowlist: ["*"]` and absent/false `strict_cwd` are honest advisories.
+  - 27 cases in `tests/test_sandbox.py` plus the `env-probe` fixture adapter, whose `usage.json`
+    reports its environment visibility and cwd inside the subprocess — kernel-recorded evidence.
+- **Budget enforcement runtime (P2.2, steps 3–4)** — `engine._run_budget` writes the per-attempt
+  verdict into `budget.json` every budgeted round (per-attempt cost stays in the file, no per-round
+  noise): `budget.soft_exceeded` notifies while the attempt stands, `budget.hard_exceeded` fails the
+  attempt, breaks the retry loop (`on_fail: loop` must not re-spend past an absolute stop), and
+  transitions the job to `failed`; a cached hard refusal is returned on resume without re-running the
+  adapter. `BudgetError` (missing/inverted limits, unpriced usage) is the deterministic
+  `config_error` status, same policy as `guard_config`. Dashboard verdicts join guard notes as
+  plain-language rows. `factory doctor` budget checks: price-table schema validity is authoritative,
+  inverted soft/hard limits and unpriced usage are advisories naming the fix.
 - **Budget and price-table schemas (P2.2, step 1)** — `kernel/schemas/budget.schema.json` validates a
   stage budget object (`tokens`, `usd` as the hard limit, `minutes`, optional `soft_usd`, unknown keys
   rejected); `kernel/schemas/price_table.schema.json` validates the per-tier table in `factory.json`
@@ -37,11 +64,11 @@ roadmap phase it belongs to so the history stays readable against [the roadmap](
   - Negative token counts clamp to zero; non-numeric counts raise, because malformed usage is
     kernel-rejected rather than estimated.
 - **Budget TDD contracts (P2.2, step 1)** — `tests/test_budgets.py` (24 cases) and the two engine
-  cases covering soft-notify and hard-stop. The engine-write-path and `doctor` cases are **red on
-  purpose**: they encode the next slices (per-attempt `budget.json`, `budget.soft_exceeded` /
-  `budget.hard_exceeded` events, and the `doctor` budget-configuration checks) before the
-  implementation exists, which is why this release reports failures instead of 0. Each slice's cases
-  turn green as it lands — a red suite here is a specification in flight, not a regression.
+  cases covering soft-notify and hard-stop. They were **red on purpose** at landing: they encoded the
+  then-unbuilt slices (per-attempt `budget.json`, `budget.soft_exceeded` / `budget.hard_exceeded`
+  events, and the `doctor` budget-configuration checks) before the implementation existed — a TDD
+  slice in flight, not a regression. All of them have since turned green with the engine and doctor
+  slices above.
 - **Commit provenance subsystem** — `kernel/src/factory_kernel/provenance.py` plus
   `factory provenance verify [--range --require --allow --all-before --allowlist --json]`, a
   deterministic check that commits carry their `AI-Tool` / `AI-Model` trailers. Supporting files:

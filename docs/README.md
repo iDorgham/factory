@@ -7,8 +7,9 @@ enforces, agents only propose.
 > code does *today*; the [specification v3.0](specification/Enterprise%20AI%20Software%20Factory%20%E2%80%94%20Specification%20v3.0.md)
 > describes what it *should* do. Where the two differ, the gap is stated rather than papered over.
 
-**Snapshot:** 2026-10-17 at `1895f14` · **Status:** P0 and P1 complete · P2.1 guards landed · P2.2
-budgets landed · **Suite:** 312 collected (310 passed, 2 skipped — fully green after the P2.2 close).
+**Snapshot:** 2026-10-17 at `b3696c6` · **Status:** P0 and P1 complete · P2.1 guards landed · P2.2
+budgets landed · P2.3 sandbox hardening landed · **Suite:** 343 collected (341 passed, 2 skipped —
+fully green after the P2.3 close).
 
 ---
 
@@ -91,13 +92,13 @@ start), [`CHANGELOG.md`](../CHANGELOG.md), [`CONTRIBUTING.md`](../CONTRIBUTING.m
 
 | Path | What lives there |
 |------|------------------|
-| `kernel/src/factory_kernel/` | The reference kernel — 20 modules |
-| `kernel/schemas/` | 7 JSON Schemas + `CHANGELOG.md` (the schema migration log) |
+| `kernel/src/factory_kernel/` | The reference kernel — 21 modules |
+| `kernel/schemas/` | 8 JSON Schemas + `CHANGELOG.md` (the schema migration log) |
 | `kernel/presets/` | `solo` / `team` / `enterprise` policy presets |
 | `kernel/stages/` | `lite.yaml` and `standard.yaml` stage profiles |
 | `roles/` | Markdown role contracts (5 starter) |
 | `adapters/` | `echo`, the live `cli-agent` backend, and the `visual-capture` check producer |
-| `tests/` | 24 hermetic test modules (312 cases) + adapter fixtures |
+| `tests/` | 25 hermetic test modules (343 cases) + adapter fixtures |
 
 ---
 

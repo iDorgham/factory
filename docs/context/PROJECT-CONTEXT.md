@@ -1,8 +1,8 @@
 # Enterprise AI Software Factory — Full Project Context
 
-> A portable briefing for any AI tool or model. Snapshot date: **2026-10-17**, commit `1895f14`
-> (reconciled against the working tree: **312 tests collected — 310 passed, 2 skipped, 0 failed** —
-> fully green at the close of P2.2).
+> A portable briefing for any AI tool or model. Snapshot date: **2026-10-17**, commit `b3696c6`
+> (reconciled against the working tree: **343 tests collected — 341 passed, 2 skipped, 0 failed** —
+> fully green at the close of P2.3).
 > Everything below is grounded in the repository. Where something is unknown, it is labeled as unknown.
 
 ---
@@ -19,9 +19,9 @@ with which it can say "this is actually done," not the number of agents it runs.
 
 The system is a **runnable reference implementation** of a canonical specification (v3.0). The specification
 is the source of truth for intended behavior; the code implements P0 (kernel core) and P1 (Solo slice)
-fully, plus P2.1 (guards) and P2.2 (budgets) within the trust layer.
+fully, plus P2.1 (guards), P2.2 (budgets), and P2.3 (sandbox) within the trust layer.
 
-**Status right now:** P0 complete; **P1 Solo slice complete** (stage-graph engine, build loop, live `cli-agent` adapter, checkpoints, SHA-bound approval, worktrees + merge queue + Undo, question budget, and real visual capture via headless Edge/Chrome) — all proven end-to-end on the real tree; **P2.1 guards landed** (three deterministic diff guards, structural authorization, engine hook, dashboard verdicts, doctor integrity checks); **P2.2 budgets landed** (budget + price-table schemas, pure cost meter, engine enforcement — verdict file, breach events, hard stop, cached-refusal idempotency, dashboard verdict rows — and doctor integrity checks). Next head of the P2 queue: **sandbox hardening** (§12 gap #5) and **risk-scored gates** (§12 gap #6).
+**Status right now:** P0 complete; **P1 Solo slice complete** (stage-graph engine, build loop, live `cli-agent` adapter, checkpoints, SHA-bound approval, worktrees + merge queue + Undo, question budget, and real visual capture via headless Edge/Chrome) — all proven end-to-end on the real tree; **P2.1 guards landed** (three deterministic diff guards, structural authorization, engine hook, dashboard verdicts, doctor integrity checks); **P2.2 budgets landed** (budget + price-table schemas, pure cost meter, engine enforcement — verdict file, breach events, hard stop, cached-refusal idempotency, dashboard verdict rows — and doctor integrity checks); **P2.3 sandbox landed** (`factory.json` schema-globally validated, pure env sanitization with an allowlist, kernel-reserved `FACTORY_*` attribution injection, lexical path containment, `strict_cwd` worktree lock, and doctor integrity checks). Next head of the P2 queue: **risk-scored gates** (§12 gap #6) and **prompt-injection handling** (§12).
 
 ---
 
@@ -147,7 +147,7 @@ cancelled | superseded → archived
 | `hashing.py` | `sha256_hex`, `event_hash`, `content_hash`. |
 | `schemas.py` | `SchemaStore` — Draft 2020-12 validation of every kernel write. |
 | `profiles.py` | Stage-profile loader + YAML validation (`lite`, `standard`). |
-| `engine.py` | `Engine` — drives a job through its stage profile: attempt dirs, context manifest, adapter invocation, kernel-run checks, gate evaluation, and the build loop with failure-fingerprint no-progress detection → `stalled` (spec §9.2). |
+| `engine.py` | `Engine` — drives a job through its stage profile: attempt dirs, context manifest, sandboxed adapter invocation (P2.3: sanitized env with kernel-reserved `FACTORY_*` attribution, `strict_cwd` locks adapter cwd to the job worktree, sandbox paths proven contained), kernel-run checks, gate evaluation, and the build loop with failure-fingerprint no-progress detection → `stalled` (spec §9.2). |
 | `checks.py` | Real command runner with trimmed output, required/conditional checks, `required_checks` meta-check, stable failure fingerprints. |
 | `context.py` | `context.manifest.json` builder (schema-valid), resolving brief/requires + project memory, with token budgeting/degradation. |
 | `adapters.py` | Adapter discovery, manifest loading, capability/role selection, NDJSON subprocess run contract with error classification. |
@@ -158,6 +158,7 @@ cancelled | superseded → archived
 | `provenance.py` | Commit provenance trailer conventions, build + verify (`factory provenance verify`), enforced per-commit since P2.1 by the commit-msg hook and CI. |
 | `guards.py` | Pure deterministic diff guards (`no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff`) + registry `GUARDS`; hard-fail on unknown id, exact-path structural `authorized()`. |
 | `budgets.py` | Pure deterministic cost calculation, limit checking, and fail-hard unpriced-usage enforcement: `calculate_cost` (price table × reported usage, any unpriced metered metric raises `BudgetError` — unpriced usage never silently costs $0), `stage_limits` (soft/hard resolution, `0.8 × usd` default soft, inverted limits raise), `check_budget` (inclusive boundaries). No I/O — the engine owns verdicts and events. |
+| `sandbox.py` | Pure deterministic environment sanitization, lexical path containment, and fail-hard sandbox policy enforcement: `sanitize_env` (allowlist intersection of the kernel env — case-insensitive exact or `*`-suffix rules, lone `*` as explicit opt-out; output preserves order/values), `resolve_under` (relative paths root at base, absolute must sit inside, escapes raise `SandboxError`; pure string math after `normpath`+`normcase`, symlinks deliberately not resolved), `load_sandbox_policy` / `SandboxPolicy.from_config` (missing keys → documented defaults; unknown type, empty allowlist, malformed keys raise). No I/O — the engine owns subprocess wiring and doctor owns config integrity. |
 | `cli.py` | The `factory` command (see §9). |
 
 ---
@@ -174,11 +175,11 @@ factory/
 ├── CHANGELOG.md CONTRIBUTING.md SECURITY.md   # repository-level entry points
 ├── kernel/
 │   ├── schemas/                 # event, job, project, context.manifest, authorizations,
-│   │                            #   budget, price_table (7) + CHANGELOG (schema migration log)
+│   │                            #   budget, price_table, factory (8) + CHANGELOG (schema migration log)
 │   ├── presets/                 # solo.json, team.json, enterprise.json
 │   ├── stages/                  # lite.yaml, standard.yaml
-│   └── src/factory_kernel/      # the Python reference kernel (21 .py files: 20 modules + package __init__)
-├── tests/                       # hermetic pytest suite (312 collected: 310 passed,
+│   └── src/factory_kernel/      # the Python reference kernel (22 .py files: 21 modules + package __init__)
+├── tests/                       # hermetic pytest suite (343 collected: 341 passed,
 │   │                            #   2 skipped — fully green after P2.2)
 │   └── fixtures/adapters/       # slow, fake-browser, cli-echo-agent, cli-ask-agent, budget-burner
 ├── roles/                       # markdown role contracts (5 starter: analyst, planner, builder, verifier, integrator)
@@ -280,7 +281,7 @@ Root/actor overrides: `--root`, `--actor`.
 |-------|---------|--------|
 | **P0 Kernel core** | events/snapshot, atomic writes, leases+fencing, schema validation, check runner, `doctor`, `reindex` | ✅ Complete |
 | **P1 Solo slice** | lite execution, adapter runtime, build loop, checkpoints + SHA-bound approval, conformance suite, dashboard, worktrees + merge/undo, question budget, real visual capture | ✅ Complete |
-| **P2 Trust layer** | budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline | 🚧 **In progress** — P2.1 guards landed (diff collection, three deterministic guards, engine hook, fingerprint feed, plain-language dashboard verdicts, doctor integrity checks); P2.2 budgets landed (schemas, pure cost meter, engine enforcement, doctor checks); remaining: sandbox hardening, risk-scored gates, import with baseline |
+| **P2 Trust layer** | budgets/metering, guards, sandbox hardening, risk-scored gates, import with baseline | 🚧 **In progress** — P2.1 guards landed (diff collection, three deterministic guards, engine hook, fingerprint feed, plain-language dashboard verdicts, doctor integrity checks); P2.2 budgets landed (schemas, pure cost meter, engine enforcement, doctor checks); P2.3 sandbox landed (`factory.json` schema, pure env sanitization + path containment, sandboxed adapter invocation, doctor checks); remaining: risk-scored gates, prompt-injection handling, import with baseline |
 | **P3 Learning** | eval harness, skill packages + promotion, lessons ledger, memory | ⬜ Planned |
 | **P4 Team** | more adapters via conformance, epics + dependencies, visual baselines, named users | ⬜ Planned |
 | **P5 Enterprise** | control plane, RBAC, hash-chained audit + anchors, brand design systems, compliance export | ⬜ Planned |
@@ -303,8 +304,8 @@ real producer are landed; capturing a served URL rather than a file is not imple
 - **Packaging:** `factory-kernel` v0.4.0; console script `factory`.
 - **Run tests:** `pip install -e ".[dev]"` then `python -m pytest` and `python -m flake8 kernel/src tests`.
 - **Hermetic tests:** each test builds a throwaway factory tree in `tmp_path` from the real schemas/presets/stages.
-- **Source metrics:** 20 kernel modules (21 `.py` files — the 21st is the package `__init__`; the set incl. checkpoint, conformance, dashboard, gitrepo, provenance, guards, budgets); 7 schemas; commit history carries `AI-Tool`/`AI-Model` provenance trailers per-commit since P2.1 (machine-verified by the commit-msg hook and CI).
-- **Test count (verified 2026-10-17 at `1895f14`):** `312 collected — 310 passed, 2 skipped` — fully green, zero failures. Test files: atomic, ulid, hashing, lease, state, transitions, profiles, schemas, kernel, doctor, engine, checks, context, adapters, cli-agent, checkpoint, conformance, dashboard, worktree (git/merge/undo/isolation), questions (Solo question budget), visual_capture (real capture producer + diffs), explain (dispatched from the dashboard), provenance, guards (P2.1: guard units, diff collection, engine hook, doctor authorizations), budgets (P2.2: cost math, limits, schemas, engine hook, doctor budget checks).
+- **Source metrics:** 21 kernel modules (22 `.py` files — the 22nd is the package `__init__`; the set incl. checkpoint, conformance, dashboard, gitrepo, provenance, guards, budgets, sandbox); 8 schemas; commit history carries `AI-Tool`/`AI-Model` provenance trailers per-commit since P2.1 (machine-verified by the commit-msg hook and CI).
+- **Test count (verified 2026-10-17 at `b3696c6`):** `343 collected — 341 passed, 2 skipped` — fully green, zero failures. Test files: atomic, ulid, hashing, lease, state, transitions, profiles, schemas, kernel, doctor, engine, checks, context, adapters, cli-agent, checkpoint, conformance, dashboard, worktree (git/merge/undo/isolation), questions (Solo question budget), visual_capture (real capture producer + diffs), explain (dispatched from the dashboard), provenance, guards (P2.1: guard units, diff collection, engine hook, doctor authorizations), budgets (P2.2: cost math, limits, schemas, engine hook, doctor budget checks), sandbox (P2.3: schema validation, env sanitization, path containment, policy parsing, subprocess cwd/env contract, sandboxed engine run, doctor sandbox checks).
 
 ---
 
@@ -314,7 +315,7 @@ real producer are landed; capturing a served URL rather than a file is not imple
 2. ~~**Question budget open**~~ — *closed 2026-10-16 (P1)*: `echo`/`cli-agent` `question` events are persisted as `job.question_asked`, deduped by id/normalized text, capped at 3 blocking questions per job, park the job `blocked`, fail the job honestly when exhausted, and surface on the dashboard card with option buttons and a free-text box. Both sides reach future attempts through `questions.md` in the context manifest.
 3. **Guards not executed** — *closed 2026-10-17 (P2.1)*: `no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff` run per attempt over the diff from the attempt-base commit; violations fail the attempt, feed the fingerprint (repeat → stalled), land as hash-chained events, and are authorized structurally by per-job `authorizations.json` (exact paths, schema-validated). `scope_guard` and plan-file-set authorization remain future.
 4. ~~**Budgets not enforced**~~ — *closed 2026-10-17 (P2.2)*: `budgets.py` (pure cost meter: `calculate_cost` prices every `X_tokens` metric at the tier's `X_per_1m` rate; unpriced usage raises `BudgetError` — nothing silently costs $0), `engine._run_budget` (verdict into `budget.json` each budgeted round; `budget.soft_exceeded` notifies while the work stands, `budget.hard_exceeded` fails the attempt and stops the retry loop; job → `failed` as an absolute stop per §543; a cached hard refusal is returned on resume without re-spending), and doctor (price-table schema validity is authoritative; inverted soft/hard limits and unpriced usage are advisories naming the fix). Per-attempt cost stays in `budget.json`; no per-attempt timeline noise. Remaining budget scope (future): budgets at job/project scope, pre-job cost estimates, cost reports, mid-run cut-off.
-5. **Sandbox is config-only** — `factory.json` declares a sandbox, but no process/container isolation is implemented (P2). Agents run with your privileges.
+5. ~~**Sandbox is config-only**~~ — *closed 2026-10-17 (P2.3)*: `factory.schema.json` validates the whole `factory.json` (first-ever global-config schema; sandbox `type` enum is `["process"]` until containers land), `sandbox.py` is the pure contract (`sanitize_env` strips the kernel env to the configured allowlist — case-insensitive exact or `*`-suffix rules, lone `*` as explicit opt-out; `resolve_under` rejects lexical path escapes; `load_sandbox_policy` fails hard on unknown types and empty allowlists), `engine._invoke_adapter` always runs adapters sandboxed (sanitized env plus kernel-reserved `FACTORY_*` attribution injected after the filter, `strict_cwd` locking adapter cwd to the job worktree), and doctor (config schema-validity is authoritative; `"*"` allowlist and absent/static-off `strict_cwd` are advisories naming the trade). Still open in sandbox scope: container isolation, network-egress and resource-limit enforcement (declared, not enforced), secrets scrubbing from logs/artifacts.
 6. **No risk scoring** — `verify` declares `gate: risk_scored`, but the score computation is absent (P2).
 7. Undo/merge — done (`gitrepo.merge_branch`/`revert_merge`, `kernel._merge_on_complete`/`job_undo`, conflict → `blocked`, `merge.undone`; dashboard Undo enabled when a merge is present).
 8. **Schema versioning is interim** — schemas have no `$id` version yet; `kernel/schemas/CHANGELOG.md` is the interim record.
