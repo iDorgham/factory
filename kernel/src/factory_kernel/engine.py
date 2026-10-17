@@ -12,6 +12,7 @@ from typing import Optional
 
 from .adapters import AdapterError, RunResult, discover_adapters, select_adapter
 from .atomic import atomic_write_json, read_json
+from .budgets import BudgetContext, BudgetError, check_budget, stage_limits
 from .checkpoint import record_checkpoint
 from .checks import fingerprint, load_checks, run_checks, summarise
 from .context import collect_stage_context
@@ -203,6 +204,19 @@ class Engine:
                 job, job_dir, state, stage, attempt, attempt_dir, project_dir, worktree,
                 adapter_id, adapters, checks_cfg, fence, check_timeout, reset=reset,
             )
+            # A hard budget breach is an absolute stop (§543): the attempt
+            # records its refusal in budget.json and the retry loop must not
+            # re-spend on on_fail: loop. The job fails decisively; raising
+            # the budget and re-executing is the operator's way forward.
+            budget_doc = read_json(attempt_dir / "budget.json", {}) or {}
+            if budget_doc.get("status") == "hard_exceeded":
+                state.transition(
+                    "failed", actor=self.k.actor, fence=fence,
+                    reason=f"hard budget exceeded in stage '{sid}': "
+                           f"${budget_doc.get('current_cost', 0.0)} >= "
+                           f"${budget_doc.get('limit', 0.0)}",
+                )
+                return "failed"
             # A new blocking question parks the job before any accept: the
             # stage re-runs with the human's answer in context. Past the
             # per-job budget the job fails instead of interrogating forever.
@@ -285,6 +299,25 @@ class Engine:
             )
             return "passed", previous.get("fingerprint"), 0
 
+        # A cached hard breach is a refusal, not a result to improve on:
+        # re-running the adapter would re-spend (§543 "budgets stop at the
+        # next safe point"). Resume returns the cached failure untouched;
+        # a human redo (reset=True) explicitly re-opens the attempt.
+        cached_budget = read_json(attempt_dir / "budget.json", {}) or {}
+        if not reset and cached_budget.get("status") == "hard_exceeded":
+            fp = fingerprint([], extra="budget:hard_exceeded")
+            atomic_write_json(attempt_dir / "result.json", {
+                "input_hash": key, "status": "failed", "fingerprint": fp,
+            })
+            state.append_event(
+                "stage.attempt_finished", actor=self.k.actor, fence=fence,
+                data={"stage": sid, "attempt": attempt, "status": "failed",
+                      "fingerprint": fp, "missing": [],
+                      "adapter_error": "budget hard_exceeded (cached refusal)"},
+                job_id=job["id"],
+            )
+            return "failed", fp, 0
+
         run = self._invoke_adapter(
             adapter, job, stage, attempt, attempt_dir, worktree, manifest, fence
         )
@@ -326,8 +359,19 @@ class Engine:
             job, job_dir, state, stage, attempt, attempt_dir, worktree, fence
         )
 
+        # Budgets price the attempt's reported usage against the stage limits
+        # (§12.2: enforced by the kernel at the stage boundary, every round,
+        # like guards). A breach fails the attempt even when every check and
+        # guard passed; a hard breach additionally stops the stage's retry
+        # loop (see _run_stage) — retrying would only re-spend.
+        budget_clean, budget_extra = self._run_budget(
+            state, stage, attempt, attempt_dir, job["id"], fence
+        )
+
         if not guards_clean:
             status = "failed"  # guards trump everything, including transients
+        elif not budget_clean:
+            status = "failed"  # budgets are ground truth over reported usage
         elif run.ok and not missing and summary["passed"]:
             status = "passed"
         elif not run.ok and (run.error_class == "transient"):
@@ -340,6 +384,8 @@ class Engine:
             extra = (extra + " " if extra else "") + "missing:" + ",".join(missing)
         if guards_extra:
             extra = (extra + " " if extra else "") + guards_extra
+        if budget_extra:
+            extra = (extra + " " if extra else "") + budget_extra
         fp = fingerprint(results, extra=extra)
 
         atomic_write_json(attempt_dir / "result.json", {
@@ -462,8 +508,77 @@ class Engine:
         return doc, []
 
     # ------------------------------------------------------------------
-    # Helpers
+    # Budgets and metering (P2.2 — spec §3.9, §12.2, §543)
     # ------------------------------------------------------------------
+
+    def _run_budget(self, state, stage, attempt, attempt_dir, job_id, fence):
+        """Price this attempt's reported usage against the stage limits.
+
+        Returns ``(clean, fingerprint_extra)``. Writes ``budget.json`` (the
+        runtime verdict: status, current_cost, the decisive limit) and emits
+        ``budget.soft_exceeded`` / ``budget.hard_exceeded`` only on breach —
+        per-attempt cost stays in the file (no ``budget.checked`` event, per
+        the Solo three-element promise: no per-round timeline noise).
+
+        Stages without a ``budget:`` declaration skip entirely (no events,
+        no files) — budgets are declared proposals, enforced by the kernel
+        where they exist (spec §3: agents propose, kernel enforces).
+
+        Purposely never raises: an invalid budget document (missing ``usd``,
+        ``soft_usd >= usd``) or unpriced usage becomes a deterministic failed
+        attempt through the pseudo-status ``config_error`` — recorded in
+        ``budget.json`` and one event, never a silent $0 cost.
+        """
+        sid = stage["id"]
+        budget = stage.get("budget")
+        if not isinstance(budget, dict) or not budget:
+            return True, ""  # no declaration, no enforcement
+
+        usage = read_json(attempt_dir / "usage.json", {}) or {}
+        price_table = (self.k.factory_cfg or {}).get("price_table") or {}
+
+        try:
+            soft_limit, hard_limit = stage_limits(budget)
+            result = check_budget(BudgetContext(
+                usage=usage, price_table=price_table,
+                soft_limit=soft_limit, hard_limit=hard_limit,
+            ))
+        except BudgetError as e:
+            atomic_write_json(attempt_dir / "budget.json", {
+                "status": "config_error", "current_cost": 0.0,
+                "limit": None, "error": str(e),
+            })
+            state.append_event(
+                "budget.hard_exceeded", actor=self.k.actor, fence=fence,
+                data={"stage": sid, "attempt": attempt, "current_cost": 0.0,
+                      "hard_limit": None, "error": str(e)},
+                job_id=job_id,
+            )
+            return False, "budget:config_error"
+
+        atomic_write_json(attempt_dir / "budget.json", {
+            "status": result.status, "current_cost": result.current_cost,
+            "limit": result.limit,
+        })
+        if result.status == "hard_exceeded":
+            state.append_event(
+                "budget.hard_exceeded", actor=self.k.actor, fence=fence,
+                data={"stage": sid, "attempt": attempt,
+                      "current_cost": result.current_cost,
+                      "hard_limit": result.limit},
+                job_id=job_id,
+            )
+            return False, (f"budget:hard_exceeded(${result.current_cost} "
+                           f">= ${result.limit})")
+        if result.status == "soft_exceeded":
+            state.append_event(
+                "budget.soft_exceeded", actor=self.k.actor, fence=fence,
+                data={"stage": sid, "attempt": attempt,
+                      "current_cost": result.current_cost,
+                      "soft_limit": result.limit},
+                job_id=job_id,
+            )
+        return True, ""
 
     def _invoke_adapter(self, adapter, job, stage, attempt, attempt_dir, worktree, manifest, fence):
         budget = stage["budget"]

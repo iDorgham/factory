@@ -390,9 +390,10 @@ def test_soft_budget_exceeded_notifies_but_continues(demo_job, monkeypatch):
 
     kernel, job = demo_job
     _install_budget_burner(kernel)
-    # build: soft default 0.8 x $5.00 = $4.00, hard $5.00; 1_600_000 input
-    # tokens at $3/1M = $4.80 — between the two.
-    monkeypatch.setenv("FACTORY_BUDGET_INPUT_TOKENS", "1600000")
+    # build: soft default 0.8 x $5.00 = $4.00, hard $5.00. The burner always
+    # emits 500 output tokens ($0.0075 at $15/1M), so 1_597_500 input tokens
+    # at $3/1M ($4.7925) total exactly $4.80 — between the two limits.
+    monkeypatch.setenv("FACTORY_BUDGET_INPUT_TOKENS", "1597500")
 
     result = kernel.job_execute(job["id"], adapter_id="budget-burner")
     assert result["state"] == "awaiting_human"  # ran on through approve gate

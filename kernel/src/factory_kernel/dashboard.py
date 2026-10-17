@@ -131,6 +131,7 @@ def _timeline(kernel, job) -> list[dict]:
     events = _events(kernel, job)
     rounds: dict[str, int] = {}
     guard_notes: dict[str, dict] = {}
+    budget_notes: dict[str, dict] = {}
     for ev in events:
         if ev["type"] == "stage.attempt_started":
             sid = ev["data"].get("stage")
@@ -145,6 +146,14 @@ def _timeline(kernel, job) -> list[dict]:
             prev = guard_notes.get(sid)
             if not prev or data.get("attempt", 0) >= prev["attempt"]:
                 guard_notes[sid] = note
+        elif ev["type"] in ("budget.soft_exceeded", "budget.hard_exceeded"):
+            # Latest budget verdict per stage, like guard notes (§12.2).
+            data = ev["data"]
+            sid = data.get("stage")
+            prev = budget_notes.get(sid)
+            if not prev or data.get("attempt", 0) >= prev["attempt"]:
+                budget_notes[sid] = {
+                    "hard": ev["type"] == "budget.hard_exceeded", "data": data}
 
     accepted_ids = [s["id"] for s in stages if s["id"] in accepted]
     if job.get("state") == "awaiting_human" and accepted_ids:
@@ -181,7 +190,32 @@ def _timeline(kernel, job) -> list[dict]:
             "id": f"{sid}:guards", "phrase": phrase, "status": status,
             "round": None, "rounds": None,
         })
+    # Budget verdicts read the same way (P2.2): the cost, the limit, whether
+    # the journey stopped or kept going.
+    for sid, note in sorted(budget_notes.items(),
+                            key=lambda item: order.get(item[0], len(stages))):
+        data, cost = note["data"], note["data"].get("current_cost", 0.0)
+        if note["hard"]:
+            if data.get("error"):
+                phrase = f"⚠ Budget configuration is broken: {data['error']}"
+            else:
+                phrase = (f"⚠ Hard budget exceeded in stage '{sid}' "
+                          f"(${_usd(cost)} ≥ ${_usd(data.get('hard_limit'))})")
+            status = "failed"
+        else:
+            phrase = (f"⚠ Soft budget crossed in stage '{sid}' "
+                      f"(${_usd(cost)} ≥ ${_usd(data.get('soft_limit'))}); keeping going")
+            status = "active"
+        timeline.append({
+            "id": f"{sid}:budget", "phrase": phrase, "status": status,
+            "round": None, "rounds": None,
+        })
     return timeline
+
+
+def _usd(value) -> str:
+    """Compact dollars for human lines, as the operator thinks of them."""
+    return f"{float(value or 0.0):.2f}"
 
 
 # Plain-language words per (guard, kind). Unknown kinds fall back to the raw
