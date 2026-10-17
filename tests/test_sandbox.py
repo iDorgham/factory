@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from factory_kernel.atomic import read_json
 from factory_kernel.schemas import SchemaStore
 from factory_kernel.adapters import Adapter
 
@@ -324,6 +325,65 @@ class TestAdapterSubprocess:
 
         assert captured["cwd"] == str(adapter.dir)
         assert "env" not in captured  # operator-side conformance inherits
+
+
+# ----------------------------------------------------------------------
+# Doctor sandbox-integrity checks (red: Step 4)
+# ----------------------------------------------------------------------
+
+class TestDoctorSandbox:
+    def test_shipped_tree_reports_clean_sandbox(self, kernel):
+        report = kernel.doctor()
+        assert report["ok"] is True
+        assert not any("factory.json" in e for e in report["errors"]), \
+            report["errors"]
+        assert not any(w.startswith("Sandbox") for w in report["warnings"]), \
+            report["warnings"]
+
+    def test_doctor_flags_invalid_factory_config(self, kernel):
+        cfg = read_json(kernel.root / "factory.json")
+        cfg["sandbox"]["type"] = "container"  # not implemented
+        (kernel.root / "factory.json").write_text(
+            json.dumps(cfg, indent=2), encoding="utf-8")
+
+        report = kernel.doctor()
+        assert report["ok"] is False
+        assert any(e.startswith("factory.json is schema-invalid:")
+                   for e in report["errors"]), report["errors"]
+
+    def test_doctor_warns_on_sandbox_footguns(self, kernel):
+        cfg = read_json(kernel.root / "factory.json")
+        cfg["sandbox"]["env_allowlist"] = ["*"]  # explicit opt-out
+        (kernel.root / "factory.json").write_text(
+            json.dumps(cfg, indent=2), encoding="utf-8")
+
+        report = kernel.doctor()
+        assert report["ok"] is True  # valid config, honest foot-gun warning
+        assert any(w.startswith("Sandbox env_allowlist contains '*' ")
+                   and "explicit opt-out of secret stripping" in w
+                   for w in report["warnings"]), report["warnings"]
+        # strict_cwd is still true: no cwd warning on top.
+        assert not any("strict_cwd" in w for w in report["warnings"])
+
+    def test_doctor_warns_when_strict_cwd_absent_or_false(self, kernel):
+        common = "adapter processes are not confined to the job worktree"
+
+        cfg = read_json(kernel.root / "factory.json")
+        cfg["sandbox"].pop("strict_cwd", None)
+        (kernel.root / "factory.json").write_text(
+            json.dumps(cfg, indent=2), encoding="utf-8")
+        report = kernel.doctor()
+        assert report["ok"] is True
+        assert any("strict_cwd is absent" in w and common in w
+                   for w in report["warnings"]), report["warnings"]
+
+        cfg["sandbox"]["strict_cwd"] = False
+        (kernel.root / "factory.json").write_text(
+            json.dumps(cfg, indent=2), encoding="utf-8")
+        report = kernel.doctor()
+        assert report["ok"] is True
+        assert any("strict_cwd is false" in w and common in w
+                   for w in report["warnings"]), report["warnings"]
 
 
 # ----------------------------------------------------------------------

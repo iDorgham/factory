@@ -496,6 +496,7 @@ class Kernel:
 
         self._doctor_profile_guards(report)
         self._doctor_budgets(report)
+        self._doctor_sandbox(report)
 
         for proj_dir in sorted(self.projects_dir.iterdir()):
             if not proj_dir.is_dir():
@@ -704,6 +705,50 @@ class Kernel:
                 f"{attempts(metric_counts[(tier_name, key)])} has no price "
                 f"table entry ('{metric}_per_1m' missing in tier "
                 f"'{tier_name}') — the attempt fails at runtime")
+
+    def _doctor_sandbox(self, report: dict) -> None:
+        """Sandbox configuration integrity (P2.3 — spec §5.3, §20.2).
+
+        Read-only and deterministic; ``factory.json`` is re-read from disk
+        at check time, exactly like the budget checks (doctor inspects the
+        tree as it is, not the config snapshot taken at kernel init):
+
+        - the whole config must validate against ``factory.schema.json`` —
+          authoritative, because a corrupt config means the kernel cannot
+          know what sandbox policy it is enforcing;
+        - ``env_allowlist: ['*']`` — advisory: it is a valid, explicit
+          opt-out, but it disables the primary security benefit of the
+          sandbox (secret stripping), so doctor names it plainly;
+        - ``strict_cwd`` absent or false — advisory: legacy behavior is
+          valid, but adapter processes then start outside the job
+          worktree, which weakens isolation.
+        """
+        cfg = read_json(self.root / "factory.json", {}) or {}
+        try:
+            self.schemas.validate("factory", cfg)
+        except SchemaError as e:
+            self._fail(report, f"factory.json is schema-invalid: {e}")
+            return
+
+        sandbox = cfg.get("sandbox") or {}
+        allowlist = sandbox.get("env_allowlist") or []
+        wildcard_all = [
+            str(entry).upper() for entry in allowlist if isinstance(entry, str)]
+        if "*" in wildcard_all:
+            report["warnings"].append(
+                "Sandbox env_allowlist contains '*' — this allows all "
+                "environment variables "
+                "(explicit opt-out of secret stripping)")
+        if "strict_cwd" not in sandbox:
+            state_word = "absent"
+        elif sandbox["strict_cwd"] is False:
+            state_word = "false"
+        else:
+            state_word = None
+        if state_word:
+            report["warnings"].append(
+                f"Sandbox strict_cwd is {state_word} — adapter processes "
+                "are not confined to the job worktree")
 
     def _doctor_job(self, report: dict, proj_dir: Path, job_dir: Path, now: datetime) -> None:
         label = f"{proj_dir.name}/{job_dir.name}"
