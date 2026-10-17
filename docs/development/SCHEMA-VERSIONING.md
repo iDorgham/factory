@@ -14,10 +14,18 @@ Every file format in the factory has a JSON Schema in `kernel/schemas/`, validat
 | `job.schema.json` | The derived `job.json` snapshot |
 | `project.schema.json` | `project.json` (mode, domain, profile, policy overrides) |
 | `context.manifest.schema.json` | `context.manifest.json` built before every attempt |
+| `authorizations.schema.json` | A job's kernel-owned `authorizations.json` — exact-path guard allowlists |
+| `budget.schema.json` | A stage `budget` object (`tokens`, `usd` hard limit, `minutes`, optional `soft_usd`) |
+| `price_table.schema.json` | The `price_table` block inside the global `factory.json` |
 
-Validation uses Draft 2020-12 via `SchemaStore` (`kernel/src/factory_kernel/schemas.py`). An invalid document **never reaches disk**: the write path validates first and raises `SchemaError` otherwise.
+Validation uses Draft 2020-12 via `SchemaStore` (`kernel/src/factory_kernel/schemas.py`); all seven
+kinds are registered there. An invalid document **never reaches disk**: the write path validates first and
+raises `SchemaError` otherwise.
 
-`kernel/schemas/CHANGELOG.md` records every schema change with its version and rationale.
+`kernel/schemas/CHANGELOG.md` records every schema change with its rationale and migration. Note the
+current limitation: the schema files carry no `version` field yet, so that log — not a version number —
+is the record of what changed. Adding `$id` versioning is deferred (see
+[context gap #8](../context/PROJECT-CONTEXT.md)).
 
 ## 2. Versioning rules
 
@@ -39,6 +47,17 @@ The rule of thumb: **if an existing valid file could become invalid, it's a majo
 4. Add a test to `tests/test_schemas.py`: one valid document passes, one invalid document is rejected on the write path.
 5. Record the addition in `kernel/schemas/CHANGELOG.md`.
 6. Update [Architecture §2](../architecture/ARCHITECTURE.md) if the file is part of the state model.
+
+Two worked examples of the two shapes you will meet:
+
+- **A kernel-owned file** (`authorizations.json`) is loaded and validated before anything reads it, and its
+  absence means the empty default rather than an error.
+- **A configuration block** (`price_table` inside `factory.json`) is validated at load time and is *not*
+  a standalone file — the kind name exists only for validation.
+
+**Validation-time-only kinds are the norm for anything that can make a safeguard weaker.** If an
+invalid authorization file or price table can reach the kernel, a guard or a budget silently stops
+working; rejecting it at load is the whole point.
 
 ## 4. Changing an existing schema
 

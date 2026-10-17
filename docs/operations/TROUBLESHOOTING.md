@@ -49,8 +49,22 @@ Common problems and their fixes. When in doubt, run `./factory doctor` first.
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | Agent seems to miss context | Manifest exceeded the token budget and degraded | Inspect `context.manifest.json`; raise the budget or trim includes. Degradation is ordered, never silent |
-| Hard budget stop | Budget cap reached | Expected — raise the cap deliberately (audited) or split the job |
-| Unexpected cost | A stage routed to a costlier model, or extra rounds | Check `usage.json` per attempt and the price table in `factory.json` |
+| A run is costing more than expected | A stage routed to a costlier model, or extra rounds (a build stage may run up to `max_rounds` attempts) | Check `usage.json` per attempt and the price table in `factory.json`. Budget **stop** is not enforced yet — cancel deliberately |
+| "Hard budget stop" expected but the run continued | Budget enforcement is still being wired (P2.2) | Not a bug you can fix in config. The cost arithmetic exists in `budgets.py`; the engine does not yet act on it. See [Runbook §3.7](RUNBOOK.md) |
+| `BudgetError` on unpriced usage | A usage key shaped `X_tokens` has no matching `X_per_1m` rate in the usage's model tier | Add the metric to the tier, or report usage under a priced metric. Raising instead of silently costing $0 is deliberate — see [P2 plan](../plans/P2-trust-layer.md) |
+| `BudgetError` because `soft_usd >= usd` | The stage declares a soft limit at or above its hard limit | Fix `kernel/stages/*.yaml`. The runtime will not reorder your limits for you |
+
+## Guards (P2.1)
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| An attempt failed although every check passed | A **guard** tripped over the diff — guard verdicts trump check verdicts | Read `guards.json` in the attempt dir and the `guard.violation` events; fix the change, or authorize the exact path in the job's `authorizations.json` |
+| A test deletion was blocked and the deletion was legitimate | Structural authorization is required | Add the **exact** path to `allowed_test_deletions` (no globs — wildcards never match) with `reason` / `authorized_by`, then re-run |
+| A `guard_config` violation with kind `unknown_guard` | A stage profile declares a guard id that does not exist, so that guard **never ran** | Fix the id in `kernel/stages/*.yaml` or implement the guard; confirm with `./factory doctor` |
+| `doctor` errors on `authorizations.json` | The file is kernel-owned policy and is malformed | Repair it to the schema. Absence means "nothing authorized"; a corrupt file must not be read that way |
+| A manifest change was rejected | Dependency drift: a manifest changed while its lockfile did not | Update both together, or authorize the path via `allowed_dep_changes` |
+| A job stalled right after a guard violation | Expected: guard ids + paths feed the no-progress fingerprint | Treat it as the system working. Re-authorize or change the plan rather than retrying |
+| Job stalled repeatedly on the same check | Plan too coarse, or the task is genuinely hard | Split the task and re-plan the failing step |
 
 ## Environment
 

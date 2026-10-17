@@ -58,10 +58,16 @@ Per the [roadmap](ROADMAP.md): `lite` profile end-to-end execution, one real ada
   (`adapters/visual-capture/capture.py`, headless Edge/Chrome with runtime
   theme probe), wired as the default `visual` check, bound to the checkpoint
   SHA, and rendered in the dashboard with `synthetic: false`
-- [ ] Visual-diff % and live-server preview capture (P2/P4 territory:
-  baselines are spec'd for P4; the contract already carries viewport/theme
-  naming so diffs can be added without format churn)
-- [ ] "Explain this" / "What should I do next?" helpers
+- [x] Visual-diff %: `changed_pct` per capture vs. the same viewport/theme in
+  the previous attempt (`--diff-previous`; different dimensions report no
+  number rather than guessing). Baselines and a gating threshold are P4
+  territory; the contract already carries viewport/theme naming so that work
+  needs no format churn
+- [ ] Live-server preview capture (serving the worktree and capturing it
+  instead of loading a file)
+- [x] "Explain this" / "What should I do next?" helpers — `dispatch "explain"`
+  derives a plain-language explanation from kernel state, the event log, and
+  attempt artifacts only, never agent self-report
 
 ### 6. SHA-bound approval and undo — ✅ DONE
 - [x] Approval bound to a checkpoint SHA; a changed result invalidates it and the job stays `awaiting_human`

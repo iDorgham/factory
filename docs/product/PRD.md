@@ -64,10 +64,11 @@ The factory takes an idea, an issue, or an existing repository and turns it into
 | Prompt box with cost/time estimate | User types one sentence; sees an estimated cost range before the job starts |
 | Plain-language timeline | "Understanding → Planning → Building (round 2 of 4) → Checking → Ready" — no stage jargon |
 | "Needs you" card | At most one card at a time: a multiple-choice question or the approval card |
-| Visual approval | Before/after screenshots, diff %, live preview, assumptions ledger; Approve or "Change this…" |
-| Undo | One click reverts the merge |
-| Safety floor | Human gate on irreversible external effects; hard budget caps; secrets never in context |
-| Questions limit | ≤ 3 blocking questions per job, phrased as multiple choice |
+| Visual approval | Before/after screenshots, diff %, live preview, assumptions ledger; Approve or "Change this…" — **shipped except live-server preview** (real captures ✅, `changed_pct` diff ✅, live preview ❌) |
+| Undo | One click reverts the merge — **shipped** (`factory job undo`, also on the dashboard card) |
+| Safety floor | Human gate on irreversible external effects; hard budget caps; secrets never in context — gate ✅, secrets-in-context ❌, budget caps ⚠️ (metering ships, enforcement in P2.2) |
+| Questions limit | ≤ 3 blocking questions per job, phrased as multiple choice — **shipped** |
+| "Explain this" | Plain-language explanation of the current state and the next step, derived only from kernel state — **shipped** |
 
 ### 5.2 Team
 
@@ -104,7 +105,7 @@ Everything in Team, plus:
 1. A beginner gets a previewable result with ≤ 2 approval clicks and no configuration.
 2. Two concurrent jobs on one repository never corrupt each other's work.
 3. Killing any process at any point and resuming never corrupts state and never repeats an external effect.
-4. No job exceeds its hard budget; every job's cost is visible.
+4. No job exceeds its hard budget; every job's cost is visible. — *in progress (P2.2): usage is metered and priced per attempt; the enforcing stop is not wired yet*
 5. An output that violates its stage contract is rejected before the next stage begins.
 6. Passing checks — not agent statements — are what allow a job to complete.
 7. A skill reaches global scope only with passing evals and a measured gain over baseline.
@@ -130,4 +131,12 @@ Hosted multi-tenant control plane, non-software agent orchestration, guaranteed 
 
 ## 8. Release phases
 
-See [Roadmap](../plans/ROADMAP.md). Summary: P0 kernel core (done) → P1 solo slice (in progress, mostly implemented) → P2 trust layer → P3 learning → P4 team → P5 enterprise. P4/P5 features must not be built before P0 is solid and P1 is demonstrably reliable.
+See [Roadmap](../plans/ROADMAP.md). Summary: P0 kernel core (**done**) → P1 solo slice (**done**, proven
+end to end) → P2 trust layer (**in progress**: guards landed, budgets in flight) → P3 learning → P4 team →
+P5 enterprise. P4/P5 features must not be built before P0 is solid and P1 is demonstrably reliable.
+
+> **Status discipline.** Where a requirement above is implemented, it is implemented in the kernel and
+> tested; where it is not, the [Architecture appendix](../architecture/ARCHITECTURE.md#appendix--implemented-vs-target-at-9948840)
+> says so explicitly. Two examples worth knowing today: visual approval ships with before/after screenshots
+> and diff % (live-server preview is not implemented), and hard budget caps have the cost arithmetic but
+> not yet the enforcement.

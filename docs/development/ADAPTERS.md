@@ -18,6 +18,10 @@ adapters/<tool>/
 
 Reference: [`adapters/echo/`](../../adapters/echo/) — a deterministic stand-in used by the kernel's conformance tests. [`adapters/cli-agent/`](../../adapters/cli-agent/) — the first live backend: a generic shell-out adapter (see §8).
 
+> **Not every folder under `adapters/` is an adapter.** [`adapters/visual-capture/`](../../adapters/visual-capture/)
+> holds the stdlib headless-browser capture producer wired as the default `visual` **check** (§7). It has
+> no `manifest.json`, so `discover_adapters` correctly skips it.
+
 ## 2. Manifest
 
 ```json
@@ -43,7 +47,7 @@ Reference: [`adapters/echo/`](../../adapters/echo/) — a deterministic stand-in
 | `limits` | Declared max context tokens and max run minutes. |
 | `conformance` | Declares which conformance properties hold; verified by the conformance suite. |
 
-Adapters are discovered by scanning `adapters/*/manifest.json` (`discover_adapters`). A malformed manifest is skipped, not fatal.
+Adapters are discovered by scanning `adapters/*/manifest.json` (`discover_adapters`). A malformed manifest is skipped, not fatal — and a folder without a manifest is not an adapter at all (§1).
 
 ## 3. Run contract
 

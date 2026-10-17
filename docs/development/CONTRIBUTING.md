@@ -62,7 +62,7 @@ AI-Provider: opencode
 **Note on existing history.** The P0/P1 commits predate this convention and carry no trailers; their
 provenance is recorded as owner-attested in [AI-PROVENANCE.md](../context/AI-PROVENANCE.md).
 
-#### Optional: add a commit-message template
+#### Enable the commit-message template
 
 A template is provided at `.gitmessage`. Enable it once per clone:
 
@@ -70,10 +70,28 @@ A template is provided at `.gitmessage`. Enable it once per clone:
 git config commit.template .gitmessage
 ```
 
-#### Optional: enforce the trailers
+#### Enforce the trailers locally (recommended)
 
-A `commit-msg` hook can reject commits missing `AI-Tool`/`AI-Model`. Keep enforcement opt-in until the team
-agrees; see [Review standards](#6-review-standards).
+`.githooks/commit-msg` rejects any commit missing `AI-Tool` or `AI-Model`:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It is opt-in per clone so it never surprises anyone, but **CI enforces the same rule regardless** (the
+`provenance` jobs in `.github/workflows/`), so a commit without trailers will be caught either way.
+`git commit --no-verify` bypasses the local hook; it does not bypass CI.
+
+#### Check the history
+
+```bash
+./factory provenance verify                        # whole history, allowlist applied
+./factory provenance verify --range HEAD~5..HEAD   # only the commits you touched
+./factory provenance verify --json                 # machine-readable, for scripting
+```
+
+`factory provenance verify` is the same deterministic check CI runs. Pre-convention history is
+grandfathered through `.provenance-allow` rather than rewritten.
 
 ## 4. What needs a test
 
@@ -88,21 +106,31 @@ Every change to the following **must** ship a test:
 | Schemas | Valid passes, invalid rejected on the write path |
 | Profiles | YAML validation, missing/extra fields |
 | Checks | Required/optional handling, output trimming, fingerprint stability |
-| Engine | Stage/attempt orchestration, contract validation, gates |
-| Adapters | Discovery, selection, run contract, write boundary |
+| Engine | Stage/attempt orchestration, contract validation, gates, guard hook, budget verdicts |
+| Adapters | Discovery, selection, run contract, write boundary, failure classification |
 | Checkpoints / approval | Content hash stability; SHA-bound approval refuses a changed result |
 | Conformance | Suite passes for the echo adapter; capability-gated cases skip cleanly |
+| Git / worktrees | Worktree creation, checkpoint commits, merge, conflict → blocked, undo, repo-less jobs never touching an outer checkout |
+| Guards (P2) | Each guard's violation and its authorized-silence path; unknown guard id fails hard; guard violations reach the fingerprint |
+| Budgets (P2) | Pricing against the table, unpriced usage raises, soft/hard resolution, inclusive boundaries, malformed usage rejected |
+| Provenance | Trailer detection, grandfathering, and the allowlist path |
+| Visual evidence | Manifest contract, synthetic labelling, `changed_pct` (including the "no number" cases) |
+
+Guards and budgets carry a specific extra obligation: because they are *safety* mechanisms, a test that
+only exercises the happy path is not enough. Assert what happens on the **malformed** input — an unknown
+guard id, an invalid `authorizations.json`, a usage key with no price, `soft_usd >= usd`. Degrading
+quietly is the failure mode these features exist to prevent.
 
 Hermetic test design is described in [Testing](TESTING.md).
 
 ## 5. Pull request checklist
 
-- [ ] Suite green: `python -m pytest`
+- [ ] Suite green: `python -m pytest` (or, for a deliberate TDD-red slice, the failing tests are named in the PR body and linked to a plan item)
 - [ ] Lint clean: `python -m flake8 kernel/src tests`
 - [ ] `./factory doctor` clean against a scratch tree if you touched state, events, or leases
-- [ ] Schemas updated + migration note if a file format changed
-- [ ] Docs updated (PRD / Architecture / relevant plan)
-- [ ] **Provenance trailers present** (`AI-Tool`, `AI-Model`) on every commit
+- [ ] Schemas updated + migration note in `kernel/schemas/CHANGELOG.md` if a file format changed
+- [ ] Docs updated (PRD / Architecture / relevant plan / CHANGELOG) — and no doc claims a control is shipped unless this PR ships it
+- [ ] **Provenance trailers present** (`AI-Tool`, `AI-Model`); `./factory provenance verify` passes
 - [ ] No secrets in code, tests, fixtures, or logs
 - [ ] No new runtime dependency without justification in the PR body
 - [ ] Transition table and spec/plan updated together if states changed
@@ -113,10 +141,11 @@ Hermetic test design is described in [Testing](TESTING.md).
 - Determinism is non-negotiable in the kernel: no hidden clocks, network calls, or randomness.
 - New behavior in Solo mode must have a zero-decision default.
 - When the spec and the kernel disagree, the kernel's conformance tests are authoritative and the **spec is corrected** — do both in the same PR.
-- A PR without provenance trailers is **requested to add them** (blocking for merges).
-- Adopting a `commit-msg` hook that enforces the trailers requires team agreement before it is enabled.
+- A PR without provenance trailers is **requested to add them** (blocking for merges). CI enforces this on every push, so a missing trailer fails the build rather than being caught in review.
+- A safeguard that silently degrades into a no-op is treated as a bug, not a limitation: an unknown guard id, an invalid `authorizations.json`, or unpriced usage must fail loudly.
+- A documentation change that overstates what is enforced is rejected on the same grounds as a code change that overstates it.
 
 ## 7. Reporting bugs and security issues
 
-- Functional bugs: open a GitHub issue with reproduction steps, `factory doctor` output, and the relevant `events.jsonl` excerpt (scrub secrets).
+- Functional bugs: open an issue with reproduction steps, `factory doctor` output, and the relevant `events.jsonl` excerpt (scrub secrets).
 - Security issues: do **not** open a public issue — see [Security](../operations/SECURITY.md).

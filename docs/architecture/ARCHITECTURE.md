@@ -1,7 +1,7 @@
 # Design & Architecture — Enterprise AI Software Factory
 
 **Version:** 3.0
-**Status:** Matches the P0 reference implementation
+**Status:** Matches the reference implementation at `9948840` — P0 and P1 complete, P2.1 guards landed, P2.2 budget meter landed with engine/doctor wiring in flight. Claims below that describe *target* behavior are marked as such.
 **Related:** [Specification v3.0](<../specification/Enterprise AI Software Factory — Specification v3.0.md>) · [PRD](../product/PRD.md) · [Roadmap](../plans/ROADMAP.md)
 
 > Files are the protocol. Events are the truth. A small kernel enforces. Agents only propose.
@@ -97,9 +97,13 @@ Implemented in `kernel/src/factory_kernel/state.py` (`JobState.transition`) and 
 | `context.py` | `context.manifest.json` builder — token estimation, include modes, budget degradation |
 | `adapters.py` | Adapter discovery, manifest loading, capability-based selection, NDJSON subprocess run contract with error classification |
 | `checkpoint.py` | Content-addressed checkpoints: `tree_hash`, `result_hash`, `checkpoint.json` per accepted attempt, `checkpoint.created` events |
+| `gitrepo.py` | Factory-managed git: per-project repo + `base_commit`, per-job worktree/branch, checkpoint commits, `--no-ff` merge queue (conflict → `blocked`), revert/reset Undo, and `collect_diff` for the per-attempt guard scope |
+| `guards.py` | Pure deterministic anti-cheating guards over the attempt diff (`no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff`) + the `GUARDS` registry; hard-fails on an unknown guard id; exact-path structural authorization via the job's `authorizations.json` |
+| `budgets.py` | Pure cost arithmetic: `calculate_cost` (price table × reported usage), `stage_limits` (soft/hard resolution), `check_budget` (verdict). No I/O — the engine owns verdicts and events |
+| `provenance.py` | Commit provenance trailers: build them and verify them (`factory provenance verify`) |
 | `conformance.py` | Adapter conformance suite (§20.3): start, contract-file, usage, write-boundary, injected-instruction, plus capability-gated cancel/resume/heartbeat; records `conformance.json` |
-| `dashboard.py` | Solo dashboard: `build_view`, `render_html`, `export_dashboard`, `serve` (stdlib HTTP + SSE + `POST /api/command`), `dispatch` |
-| `cli.py` | `factory` command: `project`, `job` (run/execute/approve/status/list/cancel), `request-changes`, `adapter test`, `serve`, `export-dashboard`, `doctor`, `reindex` |
+| `dashboard.py` | Solo dashboard: `build_view`, `render_html`, `export_dashboard`, `serve` (stdlib HTTP + SSE + `POST /api/command`), `dispatch` (incl. `explain` and `JOB.answer`) |
+| `cli.py` | `factory` command: `project create\|list\|status`, `job run\|execute\|approve\|undo\|answer\|status\|list\|cancel`, `request-changes`, `adapter test`, `provenance verify`, `serve`, `export-dashboard`, `doctor`, `reindex`; global `--root` / `--actor` |
 
 ## 5. Isolation and concurrency
 
@@ -119,15 +123,41 @@ Stages are YAML in `kernel/stages/` composed into profiles. A stage declares `ro
 
 ## 7. The build loop
 
-Each round is **build → checks → review (advisory) → fix**, bounded by `max_rounds` and budget.
+Each round is **build → checks → guards → accept or fingerprint**, bounded by `max_rounds` and by the
+stage's `budget` (tokens/minutes today; USD enforcement is P2.2, see §14).
 
 - Each round receives the plan, the previous handoff, trimmed failing check output, and unresolved findings — never the full transcript of earlier rounds.
 - **No-progress detection:** the kernel fingerprints each round (failing check IDs + normalized error signatures). Same fingerprint twice, or an empty diff → `stalled`. Escalation ladder: change strategy → switch model/adapter → reduce scope + re-plan → escalate to human. Each rung is an event.
-- **Guards (anti-cheating), deterministic over the diff:** `no_test_deletion`, `no_check_tampering`, `no_lockfile_surprise`, `no_secret_in_diff`, `scope_guard` (out-of-plan files allowed but raise risk).
+- **Guards (anti-cheating), deterministic over the diff (P2.1):** implemented today — `no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff`. Spec'd but **not yet implemented** — `no_check_tampering`, `scope_guard` (out-of-plan files allowed but raising the risk score).
+
+### 7.1 The guard pipeline
+
+```
+attempt start ──▶ record attempt-base SHA
+                      │
+        adapter runs ──┴──▶ writes into the attempt dir + worktree only
+                      │
+              collect_diff(base → now)      # committed + staged + unstaged + untracked
+                      │
+        load + validate authorizations.json # kernel-owned, exact paths, wildcards never match
+                      │
+        run declared guards (pure functions)
+                      │
+        ├── violations ──▶ guard.violation events (per guard, per kind)
+        │                   guards.json beside checks.json
+        │                   verdict flips the attempt to failed, even with green checks
+        │                   guard ids + paths join the attempt fingerprint → repeats stall
+        └── clean ────────▶ guards.completed event → accept decision
+```
+
+Two deliberate properties: an **unknown guard id or a malformed `authorizations.json` becomes a
+recorded `guard_config` violation** (so a typo can never silently disable a safeguard), and guards
+are fed into the same fingerprint as checks, so an agent that repeats the same violation stalls
+instead of consuming its rounds.
 
 ## 8. Roles and context
 
-Eight markdown role contracts in `roles/`: Definer, Architect, Planner, Designer, Builder, Verifier, Reviewer, Curator. Review types are **lenses**, not agents. The Integrator is not an agent — merging is a kernel function.
+Five markdown role contracts in `roles/`: analyst, planner, builder, verifier, integrator. Review types are **lenses**, not agents (the `standard` profile's `review` stage declares lenses, not roles). The Integrator is not an agent — merging is a kernel function. The spec's wider set (designer, architect, reviewer, curator) is P3/P4 work.
 
 Before every attempt the kernel writes `context.manifest.json` with a token budget and include modes (`full`, `summary`, `failures_only`, `relevant_slice`, `pointer`). Over budget, degradation is a fixed order: drop pointers → summarize old handoffs → slice repo map → fail loudly. Untrusted inputs (issues, READMEs) are wrapped and labeled as data.
 
@@ -139,9 +169,33 @@ Before every attempt the kernel writes `context.manifest.json` with a token budg
 
 ## 10. Security
 
-**Safety floor (not configurable away):** human gate for irreversible external effects; no secrets in agent env/context/files; destructive ops outside the worktree blocked; hard budget caps; audit events always written; agents cannot edit policy/budget/role/kernel files.
+**Safety floor (spec target; enforced today to the degree marked below):** human gate for irreversible
+external effects ✅ (the `approve` stage is `gate: required`; note every `lite` stage is currently
+`effects: local`, so the external-effect path is unexercised) · no secrets in agent env/context/files
+⚠️ (diff secret scanning is implemented by `no_secret_in_diff`; env and artifact handling is P2 work) ·
+destructive ops outside the worktree blocked ❌ (P2) · hard budget caps ⚠️ (cost arithmetic implemented
+in `budgets.py`, runtime enforcement in flight) · audit events always written ✅ for the event types
+that exist · agents cannot edit policy/budget/role/kernel files ✅ by construction (the write path is
+closed to agents).
 
-**Threat model mitigations:** prompt injection → untrusted wrapping + kernel-evaluated gates; secret exfiltration → no secrets in env + scanning + egress allowlist; dependency attacks → plan-bound dependency changes + install scripts disabled; test tampering → guards + read-only check config; runaway cost → hierarchical budgets; skill privilege escalation → skills carry no permissions; audit tampering → hash chain + external anchors.
+**Threat model mitigations** — current state, honestly marked: prompt injection → untrusted wrapping +
+kernel-evaluated gates ⚠️ (wrapping is spec'd; the conformance suite carries an injected-instruction
+case, full handling is P2) · secret exfiltration → no secrets in env ⚠️ + `no_secret_in_diff` ✅ +
+egress allowlist ❌ · dependency attacks → `no_lockfile_surprise` ✅ (install scripts / risk scoring
+still spec'd) · test tampering → `no_test_deletion` ✅, `no_check_tampering` ❌ · runaway cost →
+`budgets.py` ⚠️ · skill privilege escalation → skills carry no permissions (P3, no skills yet) ·
+audit tampering → event hash chain ✅, external anchors ❌ (P5).
+
+> The point of the marks is that this table can be trusted. A security document that lists planned
+> controls next to shipped ones without saying which is which is worse than a short one.
+
+## 10.1 Adapters in the tree
+
+| Folder | Kind | What it is |
+|--------|------|------------|
+| `adapters/echo/` | Adapter | Deterministic implementation of the run contract — exercises every code path without a model |
+| `adapters/cli-agent/` | Adapter | Live backend that forwards the NDJSON contract to any external command (`FACTORY_CLI_AGENT_CMD`) |
+| `adapters/visual-capture/` | **Not an adapter** | Stdlib-only headless Edge/Chrome capture producer, wired as the default `visual` **check**. It has no `manifest.json`, so adapter discovery correctly skips it |
 
 ## 11. Adapters
 
@@ -160,3 +214,27 @@ Files plus a single-host kernel comfortably handle hundreds of active jobs per p
 - Never store secrets in the factory tree.
 - Solo mode must stay simple: any feature appearing in Solo needs a zero-decision default.
 - When spec and kernel disagree, the kernel's conformance tests are authoritative and the spec is corrected.
+- Fail hard on anything a safeguard depends on. An unknown guard id, a malformed `authorizations.json`, or an unpriced usage key must raise rather than degrade — a safeguard that silently no-ops is worse than an absent one, because it looks present.
+
+---
+
+## Appendix — implemented vs. target at `9948840`
+
+The suite is **312 collected — 305 passed, 2 skipped, 5 failed**; the 5 failures are the deliberately
+red contracts for the P2.2 budget engine/doctor wiring.
+
+| Capability | State |
+|------------|-------|
+| Events, fold, snapshots, leases + fencing, atomic writes, schema validation, legal transitions | ✅ implemented, tested |
+| Stage-graph engine, build loop, no-progress detection, checkpoints, SHA-bound approval | ✅ implemented, tested |
+| Dashboard (`serve` SSE + static export), Approve / Change this… / Undo / Explain this | ✅ implemented, tested |
+| Git worktrees, checkpoint commits, merge queue, Undo | ✅ implemented, tested |
+| Adapters (`echo`, live `cli-agent`) + conformance suite | ✅ implemented, tested |
+| Solo question budget, real visual capture, visual diff `changed_pct` | ✅ implemented, tested |
+| Guards: `no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff` | ✅ implemented (40 cases) |
+| Guards: `no_check_tampering`, `scope_guard` | ❌ not implemented (P2) |
+| Budget cost meter + schemas | ✅ implemented (24 cases); engine/doctor wiring **red** |
+| Sandbox isolation | ❌ config only — no process/container enforcement |
+| Risk-scored gates | ❌ stages declare `gate: risk_scored`; no score exists |
+| Skill packages, evals, lessons, memory compounding | ❌ P3 |
+| RBAC, hash-chained audit + anchors, brands, compliance export | ❌ P5 |
