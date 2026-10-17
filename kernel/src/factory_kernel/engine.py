@@ -15,8 +15,11 @@ from .atomic import atomic_write_json, read_json
 from .checkpoint import record_checkpoint
 from .checks import fingerprint, load_checks, run_checks, summarise
 from .context import collect_stage_context
+from .gitrepo import collect_diff, head
+from .guards import GuardContext, GuardError, run_guards
 from .hashing import sha256_hex
 from .lease import LeaseManager
+from .schemas import SchemaError
 from .ulid import new_ulid
 
 # Maximum time the engine will wait for one adapter run, regardless of budget.
@@ -248,6 +251,10 @@ class Engine:
     ):
         sid = stage["id"]
         (attempt_dir / "outputs").mkdir(parents=True, exist_ok=True)
+        # Guards measure "what this round changed" against the HEAD at attempt
+        # start (spec §9.3: guards run after every round), so record it before
+        # anything can mutate the worktree.
+        attempt_base = head(worktree) or ""
 
         manifest = collect_stage_context(
             project_dir, job_dir, stage, attempt, stage["budget"].get("tokens", 100000)
@@ -256,11 +263,13 @@ class Engine:
         atomic_write_json(attempt_dir / "context.manifest.json", manifest)
 
         state.append_event("stage.attempt_started", actor=self.k.actor, fence=fence,
-                           data={"stage": sid, "attempt": attempt}, job_id=job["id"])
+                           data={"stage": sid, "attempt": attempt,
+                                 "base_sha": attempt_base}, job_id=job["id"])
 
         adapter = select_adapter(adapters, adapter_id=adapter_id, role=stage["role"])
         key = input_hash(manifest, adapter.id)
-        atomic_write_json(attempt_dir / "input.json", {"input_hash": key})
+        atomic_write_json(attempt_dir / "input.json",
+                          {"input_hash": key, "base_sha": attempt_base})
 
         # Idempotent start: identical inputs that already produced an accepted result
         # are reused rather than re-run. A human-requested redo opts out.
@@ -310,7 +319,16 @@ class Engine:
             job_id=job["id"],
         )
 
-        if run.ok and not missing and summary["passed"]:
+        # Guards run after every round, after checks, before accept (§9.3).
+        # A violation fails the attempt even when every check passed: the
+        # guards are ground truth over the diff, not advice.
+        guards_clean, guards_extra = self._run_guards(
+            job, job_dir, state, stage, attempt, attempt_dir, worktree, fence
+        )
+
+        if not guards_clean:
+            status = "failed"  # guards trump everything, including transients
+        elif run.ok and not missing and summary["passed"]:
             status = "passed"
         elif not run.ok and (run.error_class == "transient"):
             status = "interrupted"
@@ -320,6 +338,8 @@ class Engine:
         extra = run.error or ""
         if missing:
             extra = (extra + " " if extra else "") + "missing:" + ",".join(missing)
+        if guards_extra:
+            extra = (extra + " " if extra else "") + guards_extra
         fp = fingerprint(results, extra=extra)
 
         atomic_write_json(attempt_dir / "result.json", {
@@ -333,6 +353,113 @@ class Engine:
             job_id=job["id"],
         )
         return status, fp, new_blocking
+
+    # ------------------------------------------------------------------
+    # Guards (P2.1 — spec §9.3, §12.1)
+    # ------------------------------------------------------------------
+
+    def _run_guards(self, job, job_dir, state, stage, attempt, attempt_dir, worktree,
+                    fence) -> tuple[bool, str]:
+        """Run the stage's declared guards over this attempt's diff.
+
+        Returns ``(clean, fingerprint_extra)``. Emits ``guard.violation`` /
+        ``guards.completed`` events (kernel-actor, hash-chained like every
+        event) and writes ``guards.json`` (same shape as ``checks.json``).
+
+        Purposely never raises: an unknown guard id or an invalid
+        ``authorizations.json`` becomes a violation of the pseudo-guard
+        ``guard_config`` — recorded as a real event, failing the attempt
+        deterministically (same policy as a check missing from checks.json).
+        Returns ``("", "")``-clean with no events when the stage declares no
+        guards (empty list → no enforcement, per §9.3).
+        """
+        ids = list(stage.get("guards") or [])
+        sid = stage["id"]
+        if not ids:
+            return True, ""
+
+        attempt_base = (read_json(attempt_dir / "input.json", {}) or {}).get(
+            "base_sha") or ""
+        diff = collect_diff(worktree, attempt_base)
+        authorizations, config_violations = self._load_authorizations(job_dir)
+        if config_violations:
+            results = [{"guard": "guard_config", "violations": config_violations}]
+        else:
+            ctx = GuardContext(step=sid, commits={}, diff=diff,
+                               authorizations=authorizations, worktree=worktree)
+            try:
+                results = [{"guard": r.guard, "violations": list(r.violations)}
+                           for r in run_guards(ids, ctx)]
+            except GuardError as e:
+                results = [{"guard": "guard_config", "violations": [{
+                    "path": "guards", "kind": "unknown_guard",
+                    "evidence": str(e)}]}]
+
+        atomic_write_json(attempt_dir / "guards.json", {"results": results})
+        violated = [r for r in results if r.get("violations")]
+
+        if violated:
+            for result in violated:
+                self._emit_guard_violations(
+                    state, job["id"], sid, attempt, result["guard"],
+                    result["violations"], fence)
+            extra = "guards:" + "|".join(
+                f"{r['guard']}({','.join(sorted({v['path'] for v in r['violations']}))})"
+                for r in violated)
+            return False, extra
+
+        state.append_event(
+            "guards.completed", actor=self.k.actor, fence=fence,
+            data={"stage": sid, "attempt": attempt, "guards": ids,
+                  "violations": 0},
+            job_id=job["id"],
+        )
+        return True, ""
+
+    def _emit_guard_violations(self, state, job_id, sid, attempt, guard,
+                               violations, fence) -> None:
+        """One ``guard.violation`` event per (guard, kind) group.
+
+        The event data carries both the compact view (``kind`` + ``paths``)
+        and the full violation records, so dashboards get the small shape and
+        the audit chain keeps the evidence.
+        """
+        groups: dict[str, list] = {}
+        for v in violations:
+            groups.setdefault(str(v.get("kind") or "unknown"), []).append(v)
+        for kind, items in sorted(groups.items()):
+            state.append_event(
+                "guard.violation", actor=self.k.actor, fence=fence,
+                data={"stage": sid, "attempt": attempt, "guard": guard,
+                      "kind": kind, "paths": [it["path"] for it in items],
+                      "violations": items},
+                job_id=job_id,
+            )
+
+    def _load_authorizations(self, job_dir):
+        """Job-level ``authorizations.json``, validated at every use.
+
+        Lives at the job level (not the attempt directory): attempts are
+        disposable caches (§5.2) while authorization is kernel-owned job
+        state. Invalid or malformed documents are returned as ``guard_config``
+        violations instead of being silently read as "no authorization".
+        """
+        doc = read_json(job_dir / "authorizations.json")
+        if doc is None:
+            return {}, []
+        if not isinstance(doc, dict):
+            return {}, [{
+                "path": "authorizations.json", "kind": "invalid_authorization",
+                "evidence": "authorizations.json must be a JSON object",
+            }]
+        try:
+            self.k.schemas.validate("authorizations", doc)
+        except SchemaError as e:
+            return {}, [{
+                "path": "authorizations.json", "kind": "invalid_authorization",
+                "evidence": str(e),
+            }]
+        return doc, []
 
     # ------------------------------------------------------------------
     # Helpers

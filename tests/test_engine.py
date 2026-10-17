@@ -303,7 +303,8 @@ def test_guards_completed_on_clean_diff(demo_job):
     completed = [e for e in events if e["type"] == "guards.completed"
                  and e["data"].get("stage") == "build"]
     assert completed, "the build stage declares guards; they must run"
-    assert completed[0]["data"]["violations"] == []
+    assert completed[0]["data"]["violations"] == 0
+    assert "no_test_deletion" in completed[0]["data"]["guards"]
 
 
 def test_guard_violation_surfaces_on_dashboard(demo_job):
