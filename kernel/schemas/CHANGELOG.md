@@ -10,6 +10,30 @@ the record of what changed** rather than a version number. Adding `$id` versioni
 is deferred (see [context gap #8](../../docs/context/PROJECT-CONTEXT.md)); until then, this file plus the
 tests in `tests/test_schemas.py` are the contract.
 
+## `factory.schema.json`
+
+### 2026-10-17 — new file type, sandbox made well-defined (`P2.3 sandbox hardening`)
+- **Change:** first schema for the kernel's global config (`factory.json` +
+  `factory.schema.json`, registered as kind `factory`): overall shape locked
+  to the five known sections, `version` const `3.0`, `default_mode` enum.
+  The §[`sandbox`] object is now fully specified: `type` (only `"process"`
+  is implemented — container is future), `env_allowlist` (non-empty list of
+  variable names; exact matches or prefix wildcards ending in `*`, matched
+  case-insensitively; the reserved `FACTORY_*` prefix is kernel-owned),
+  `strict_cwd` (adapter subprocess runs from the job worktree),
+  `network_allowlist` / `resource_limits` (declared here; enforcement is
+  future and explicitly documented as such).
+- **Reason:** P2.3 closes gap #5 ("sandbox is config-only"). The kernel can
+  only sanitize what it can define; leak-prone provider tokens now die at
+  the schema-described boundary instead of silently reaching agent code.
+- **Also updated:** shipped `factory.json` gains the explicit hardening
+  (`env_allowlist` incl. Windows-essential `SYSTEMDRIVE`/`SYSTEMROOT`/
+  `TEMP`/`TMP`/`USERPROFILE` plus `FACTORY_*`; `strict_cwd: true`).
+- **Migration:** none. Trees with a sandbox object missing the new keys
+  remain schema-valid (the keys are optional); the kernel's documented
+  runtime defaults apply (env: built-in default allowlist; strict_cwd:
+  false).
+
 ## `budget.schema.json` / `price_table.schema.json`
 
 ### 2026-10-17 — new file types (`P2.2 budgets and metering`)

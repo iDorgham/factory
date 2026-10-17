@@ -10,6 +10,17 @@
   },
   "sandbox": {
     "type": "process",
+    "env_allowlist": [
+      "PATH",
+      "SYSTEMDRIVE",
+      "SYSTEMROOT",
+      "HOME",
+      "TEMP",
+      "TMP",
+      "USERPROFILE",
+      "FACTORY_*"
+    ],
+    "strict_cwd": true,
     "network_allowlist": ["github.com", "pypi.org", "registry.npmjs.org"],
     "resource_limits": {
       "cpu_seconds": 3600,

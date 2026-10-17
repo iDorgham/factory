@@ -1,0 +1,7 @@
+{
+  "id": "env-probe",
+  "entrypoint": "run.py",
+  "capabilities": [],
+  "roles_supported": ["analyst", "planner", "builder", "verifier", "integrator"],
+  "description": "P2.3 sandbox test fixture: reports subprocess env visibility and cwd in usage."
+}

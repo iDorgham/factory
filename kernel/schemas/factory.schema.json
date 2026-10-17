@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory.local/schemas/factory.schema.json",
+  "title": "factory.json — global kernel config (P2.3)",
+  "description": "The kernel's one config file. P2.3 makes the sandbox well-defined: the only implemented isolation is 'process', where adapter subprocesses get a sanitized environment (env_allowlist, case-insensitive names, prefix wildcards ending in '*'; the FACTORY_* prefix is kernel-reserved) and, with strict_cwd, run from the job worktree instead of the adapter directory. network_allowlist and resource_limits are declared here and enforced in later slices; a schema-valid config never implies an already-implemented enforcement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "default_mode", "price_table", "sandbox", "defaults"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "3.0",
+      "description": "Specification revision this configuration speaks."
+    },
+    "default_mode": {
+      "enum": ["solo", "team", "enterprise"],
+      "description": "Mode for new projects that do not name one."
+    },
+    "price_table": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["input_per_1m", "output_per_1m", "cached_per_1m"],
+        "properties": {
+          "input_per_1m": { "type": "number", "minimum": 0 },
+          "output_per_1m": { "type": "number", "minimum": 0 },
+          "cached_per_1m": { "type": "number", "minimum": 0 }
+        }
+      },
+      "description": "Per-tier per-million-token rates (same shape as price_table.schema.json, which remains the authoritative schema for this section)."
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_concurrent_jobs", "hard_budget_usd", "soft_budget_usd"],
+      "properties": {
+        "max_concurrent_jobs": { "type": "integer", "minimum": 1 },
+        "hard_budget_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "soft_budget_usd": { "type": "number", "minimum": 0 }
+      }
+    },
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["process"],
+          "description": "In-process subprocess isolation: sanitized env + controlled cwd. 'container' lands only with real implementation."
+        },
+        "env_allowlist": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Environment variables adapter subprocesses may keep: exact names (case-insensitive match) or prefix wildcards ending in '*' (e.g. 'FACTORY_*'; the lone '*' keeps everything and is an explicit opt-out). Absent at runtime: the kernel's documented default allowlist applies."
+        },
+        "strict_cwd": {
+          "type": "boolean",
+          "description": "When true, adapter subprocesses run with cwd set to the job's worktree instead of the adapter directory. Absent: false (back-compat)."
+        },
+        "network_allowlist": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Hostnames the sandbox should restrict adapters to. Declared here since P0; enforcement is still future (do not mistake this list for a working firewall)."
+        },
+        "resource_limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu_seconds", "memory_mb", "disk_mb"],
+          "properties": {
+            "cpu_seconds": { "type": "integer", "minimum": 1 },
+            "memory_mb": { "type": "integer", "minimum": 1 },
+            "disk_mb": { "type": "integer", "minimum": 1 }
+          },
+          "description": "Declared ceilings for one attempt. Enforced by the per-stage 'minutes' timeout today; the rest is future."
+        }
+      }
+    }
+  }
+}
