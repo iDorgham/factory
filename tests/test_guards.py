@@ -256,7 +256,7 @@ class TestNoLockfileSurprise:
 class TestNoSecretInDiff:
     @pytest.mark.parametrize("needle", [
         "AKIAABCDEFGHIJKLMNOP",                                  # AWS access key
-        "ghp_0123456789abcdef0123456789abcdef01234567",           # GitHub PAT
+        "ghp_0123456789abcdef0123456789abcdef0123",               # GitHub PAT
         "-----BEGIN RSA PRIVATE KEY-----",                        # PEM key block
     ])
     def test_secrets_are_flagged(self, tmp_path, needle):
@@ -287,7 +287,7 @@ class TestNoSecretInDiff:
 
         diff = dict([_mod(
             "src/app.py",
-            removed=["token = 'ghp_0123456789abcdef0123456789abcdef01234567'"])])
+            removed=["token = 'ghp_0123456789abcdef0123456789abcdef0123'"])])
         results = run_guards(["no_secret_in_diff"], _ctx(diff, tmp_path=tmp_path))
         assert results[0].violations == []
 
