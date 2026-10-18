@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://factory.local/schemas/injection.schema.json",
+  "title": "injection — prompt-injection detection configuration (P2 injection handling)",
+  "description": "Regex patterns for detecting prompt injection in untrusted manifest items. Baseline patterns are kernel-owned; config may ADD patterns but cannot override or remove baseline ids. additionalProperties: false at every level.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["patterns"],
+  "properties": {
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "pattern"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "pattern": { "type": "string", "minLength": 1 },
+          "weight": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

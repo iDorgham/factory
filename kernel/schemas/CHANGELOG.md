@@ -10,6 +10,15 @@ the record of what changed** rather than a version number. Adding `$id` versioni
 is deferred (see [context gap #8](../../docs/context/PROJECT-CONTEXT.md)); until then, this file plus the
 tests in `tests/test_schemas.py` are the contract.
 
+## [Unreleased]
+
+### Added
+- `injection.schema.json`: P2 prompt-injection detection configuration schema.
+- `factory.schema.json`: Optional `injection` configuration section.
+- `event.schema.json`: Added `injection.detected` to type enum.
+- `risk.schema.json`: Added `injection_flag` to required weights.
+- `context.manifest.schema.json`: Updated `untrusted_content` items to objects with optional `injection_flags` array.
+
 ## `risk.schema.json`
 
 ### 2026-10-17 — new file type: the risk-gate configuration (`P2.4 risk-scored gates`)

@@ -39,7 +39,8 @@
         "job.completed",
         "job.failed",
         "job.cancelled",
-        "job.archived"
+        "job.archived",
+        "injection.detected"
       ]
     },
     "actor": { "type": "string" },

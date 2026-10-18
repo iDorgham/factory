@@ -88,19 +88,21 @@
         "weights": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "guard_violation",
-            "budget_soft_exceeded",
-            "budget_hard_exceeded",
-            "check_failure",
-            "retry_attempt"
-          ],
+      "required": [
+        "guard_violation",
+        "budget_soft_exceeded",
+        "budget_hard_exceeded",
+        "check_failure",
+        "retry_attempt",
+        "injection_flag"
+      ],
           "properties": {
             "guard_violation": { "type": "integer", "minimum": 0 },
             "budget_soft_exceeded": { "type": "integer", "minimum": 0 },
             "budget_hard_exceeded": { "type": "integer", "minimum": 0 },
             "check_failure": { "type": "integer", "minimum": 0 },
-            "retry_attempt": { "type": "integer", "minimum": 0 }
+            "retry_attempt": { "type": "integer", "minimum": 0 },
+            "injection_flag": { "type": "integer", "minimum": 0 }
           }
         },
         "thresholds": {
@@ -111,6 +113,26 @@
             "low": { "type": "integer", "minimum": 0 },
             "medium": { "type": "integer", "minimum": 0 },
             "high": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "injection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Prompt-injection detection configuration. Absent: kernel baseline patterns apply. Present-but-empty: InjectionError at load. Config may add patterns but cannot override baseline pattern ids.",
+      "properties": {
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "pattern"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "pattern": { "type": "string", "minLength": 1 },
+              "weight": { "type": "integer", "minimum": 0 }
+            }
           }
         }
       }

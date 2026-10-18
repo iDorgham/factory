@@ -11,12 +11,13 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Points one occurrence of each signal adds to the score. Output is clamped to the threshold cap, so sums can exceed it.",
-      "required": [
+        "required": [
         "guard_violation",
         "budget_soft_exceeded",
         "budget_hard_exceeded",
         "check_failure",
-        "retry_attempt"
+        "retry_attempt",
+        "injection_flag"
       ],
       "properties": {
         "guard_violation": {
@@ -39,13 +40,18 @@
           "minimum": 0,
           "description": "Per failing check in the attempt's checks.json."
         },
-        "retry_attempt": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Per retry of the stage: attempt_number - 1. Struggle is evidence, not proof."
+          "retry_attempt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Per retry of the stage: attempt_number - 1. Struggle is evidence, not proof."
+          },
+          "injection_flag": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Per injection flag detected on an untrusted manifest item."
+          }
         }
-      }
-    },
+      },
     "thresholds": {
       "type": "object",
       "additionalProperties": false,

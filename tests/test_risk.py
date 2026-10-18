@@ -44,6 +44,7 @@ DEFAULT_WEIGHTS = {
     "budget_hard_exceeded": 50,
     "check_failure": 15,
     "retry_attempt": 10,
+    "injection_flag": 100,
 }
 DEFAULT_THRESHOLDS = {"low": 25, "medium": 50, "high": 100}
 

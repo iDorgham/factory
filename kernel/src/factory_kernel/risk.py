@@ -29,6 +29,7 @@ DEFAULT_WEIGHTS = {
     "budget_hard_exceeded": 50,
     "check_failure": 15,
     "retry_attempt": 10,
+    "injection_flag": 100,
 }
 DEFAULT_THRESHOLDS = {"low": 25, "medium": 50, "high": 100}
 
@@ -42,7 +43,7 @@ _SIGNAL_KEYS = frozenset({
     "guard_violations", "budget_status", "check_failures", "attempt_number"})
 _WEIGHT_KEYS = frozenset({
     "guard_violation", "budget_soft_exceeded", "budget_hard_exceeded",
-    "check_failure", "retry_attempt"})
+    "check_failure", "retry_attempt", "injection_flag"})
 _THRESH_KEYS = frozenset({"low", "medium", "high"})
 _BUDGET_STATUSES = frozenset({"ok", "soft_exceeded", "hard_exceeded"})
 

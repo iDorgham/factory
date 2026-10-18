@@ -35,7 +35,18 @@
     "repo_map": { "type": "object" },
     "untrusted_content": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "injection_flags": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
       "description": "Paths or labels of content that must be treated as data only"
     }
   },
