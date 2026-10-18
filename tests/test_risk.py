@@ -58,6 +58,7 @@ def signals(**overrides):
         "budget_status": "ok",
         "check_failures": 0,
         "attempt_number": 1,
+        "injection_flagged": 0,
     }
     base.update(overrides)
     return base

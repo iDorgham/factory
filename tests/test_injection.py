@@ -267,17 +267,19 @@ class TestEngineInjection:
         self._add_untrusted_issue(kernel, job["id"])
         kernel.job_execute(job["id"], adapter_id="echo")
 
-        # The engine must feed injection_flagged into risk signals via
-        # _stage_signals. Without engine wiring this key is absent.
-        job_dir = kernel._find_job_dir(job["id"])
-        state = kernel._job_state(job_dir)
-        # Find the last risk.computed event for the understand stage
-        risk_events = [
-            e for e in state.load_events()
-            if e["type"] == "risk.computed"
-            and e["data"].get("stage") == "understand"
-        ]
-        assert risk_events, "engine must compute risk for scored stages"
+        # Injection.detected is emitted during understand; risk.computed fires
+        # at verify (gate: risk_scored) and its signals must carry
+        # injection_flagged: 1 from the earlier detection.
+        from factory_kernel.atomic import read_jsonl
+        events = read_jsonl(
+            kernel._find_job_dir(job["id"]) / "events.jsonl")
+        injection_events = [e for e in events if e["type"] == "injection.detected"]
+        assert injection_events, "engine must emit injection.detected event"
+
+        risk_events = [e for e in events
+                       if e["type"] == "risk.computed"
+                       and e["data"].get("stage") == "verify"]
+        assert risk_events, "engine must compute risk for verify stage"
         signals = risk_events[-1]["data"].get("signals", {})
         assert signals.get("injection_flagged") == 1, \
             "signals must include injection_flagged when injection detected"

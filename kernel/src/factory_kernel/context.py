@@ -61,7 +61,9 @@ def build_manifest(
     if repo_map is not None:
         manifest["repo_map"] = repo_map
     if untrusted:
-        manifest["untrusted_content"] = untrusted
+        manifest["untrusted_content"] = [
+            {"path": p, "injection_flags": []} for p in untrusted
+        ]
     return manifest
 
 
@@ -78,6 +80,7 @@ def collect_stage_context(
     stage: dict,
     attempt: int,
     token_budget: int,
+    untrusted: Optional[list[str]] = None,
 ) -> dict:
     """Assemble the manifest for an attempt from job files + project memory.
 
@@ -127,6 +130,17 @@ def collect_stage_context(
         except ValueError:
             repo_map = None
 
+    # Discover untrusted items (e.g. issues in the job dir) so the engine
+    # can scan them for injection before the adapter sees them.
+    if untrusted is None:
+        discovered: list[str] = []
+        issues_dir = job_dir / "issues"
+        if issues_dir.is_dir():
+            for p in sorted(issues_dir.iterdir()):
+                if p.is_file():
+                    discovered.append(f"issues/{p.name}")
+        untrusted = discovered or None
+
     return build_manifest(
         job_id=job_dir.name,
         stage=stage["id"],
@@ -135,6 +149,7 @@ def collect_stage_context(
         files=files,
         summaries=summaries,
         repo_map=repo_map,
+        untrusted=untrusted,
     )
 
 

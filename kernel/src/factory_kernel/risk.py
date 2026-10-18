@@ -40,7 +40,8 @@ _BAND_ACTIONS = {
 }
 
 _SIGNAL_KEYS = frozenset({
-    "guard_violations", "budget_status", "check_failures", "attempt_number"})
+    "guard_violations", "budget_status", "check_failures",
+    "attempt_number", "injection_flagged"})
 _WEIGHT_KEYS = frozenset({
     "guard_violation", "budget_soft_exceeded", "budget_hard_exceeded",
     "check_failure", "retry_attempt", "injection_flag"})
@@ -101,21 +102,27 @@ def compute_score(signals: dict, config: dict) -> int:
 
     The engine assembles ``signals`` from kernel-owned records; the shape is
     pinned: ``guard_violations`` (count), ``check_failures`` (count),
-    ``attempt_number`` (1-based; retries = attempts - 1), and
+    ``attempt_number`` (1-based; retries = attempts - 1),
     ``budget_status`` (``ok``/``soft_exceeded``/``hard_exceeded`` from the
-    winning attempt's ``budget.json``). Anything unknown, missing, negative,
-    or non-integer raises ``RiskError`` — malformed input never becomes a
-    guessed score.
+    winning attempt's ``budget.json``), and ``injection_flagged`` (0 or 1;
+    set when any injection pattern was matched in an untrusted manifest item).
+    Anything unknown, missing, negative, or non-integer raises ``RiskError``
+    — malformed input never becomes a guessed score.
     """
     weights, thresholds = _validate_config(config)
     if not isinstance(signals, dict) or set(signals) != _SIGNAL_KEYS:
         raise RiskError(
             "signals must have exactly the keys "
-            "guard_violations/budget_status/check_failures/attempt_number")
+            "guard_violations/budget_status/check_failures/attempt_number/"
+            "injection_flagged")
 
     guard_violations = _strict_int(signals["guard_violations"])
     check_failures = _strict_int(signals["check_failures"])
     attempt_number = _strict_int(signals["attempt_number"])
+    injection_flagged = _strict_int(signals["injection_flagged"])
+    if injection_flagged not in (0, 1):
+        raise RiskError(
+            f"injection_flagged must be 0 or 1, got {injection_flagged}")
     budget_status = signals["budget_status"]
     if not isinstance(budget_status, str) or budget_status not in _BUDGET_STATUSES:
         raise RiskError(
@@ -132,6 +139,7 @@ def compute_score(signals: dict, config: dict) -> int:
         guard_violations * weights["guard_violation"]
         + check_failures * weights["check_failure"]
         + retries * weights["retry_attempt"]
+        + injection_flagged * weights["injection_flag"]
     )
     if budget_status == "soft_exceeded":
         score += weights["budget_soft_exceeded"]

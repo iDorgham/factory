@@ -26,6 +26,7 @@ from .hashing import sha256_hex
 from .lease import LeaseManager
 from .risk import RiskError, assess, load_risk_config
 from .schemas import SchemaError
+from .injection import InjectionError, load_injection_config, scan_item
 from .ulid import new_ulid
 
 # Maximum time the engine will wait for one adapter run, regardless of budget.
@@ -292,6 +293,67 @@ class Engine:
         key = input_hash(manifest, adapter.id)
         atomic_write_json(attempt_dir / "input.json",
                           {"input_hash": key, "base_sha": attempt_base})
+
+        # Injection detection on manifest untrusted items (P2 injection
+        # handling). Runs before the adapter sees the manifest. Both labeling
+        # (injection_flags on manifest entries) and event emission
+        # (injection.detected) happen together; the real enforcement is the
+        # risk signal fed into _stage_signals.
+        injection_config_error = None
+        try:
+            injection_config = load_injection_config(
+                (self.k.factory_cfg or {}).get("injection")
+            )
+            patterns = injection_config["patterns"]
+            for entry in manifest.get("untrusted_content") or []:
+                item_path = entry["path"]
+                item_path_full = Path(job_dir) / item_path
+                if item_path_full.exists():
+                    text = item_path_full.read_text(encoding="utf-8")
+                    flags = scan_item(text, patterns)
+                    if flags:
+                        entry["injection_flags"] = [
+                            flag["pattern_id"] for flag in flags]
+                        for flag in flags:
+                            state.append_event(
+                                "injection.detected",
+                                actor=self.k.actor,
+                                fence=fence,
+                                data={
+                                    "stage": sid,
+                                    "attempt": attempt,
+                                    "item_path": item_path,
+                                    "pattern_id": flag["pattern_id"],
+                                    "matched_excerpt": flag["matched_excerpt"],
+                                    "confidence": flag["confidence"],
+                                },
+                                job_id=job["id"],
+                            )
+        except InjectionError as e:
+            injection_config_error = str(e)
+
+        # Re-write manifest with injection_flags attached (even when empty).
+        atomic_write_json(attempt_dir / "context.manifest.json", manifest)
+
+        # Config error → fail the attempt deterministically (same policy as
+        # budget/guard config errors). Never silently degrades.
+        if injection_config_error:
+            fp = fingerprint([], extra="injection:config_error")
+            atomic_write_json(attempt_dir / "injection.json", {
+                "status": "config_error", "error": injection_config_error,
+            })
+            atomic_write_json(attempt_dir / "result.json", {
+                "input_hash": key, "status": "failed", "fingerprint": fp,
+            })
+            state.append_event(
+                "stage.attempt_finished", actor=self.k.actor, fence=fence,
+                data={"stage": sid, "attempt": attempt, "status": "failed",
+                      "fingerprint": fp, "missing": [],
+                      "adapter_error": f"injection:config_error: "
+                      f"{injection_config_error}"},
+                job_id=job["id"],
+            )
+            return "failed", fp, 0
 
         # Idempotent start: identical inputs that already produced an accepted result
         # are reused rather than re-run. A human-requested redo opts out.
@@ -883,8 +945,13 @@ class Engine:
         """
         guard_violations = 0
         check_failures = 0
+        injection_flagged = 0
         for ev in state.load_events():
             data = ev.get("data", {})
+            if ev["type"] == "injection.detected":
+                # Any injection detected in the job raises the signal for
+                # all downstream scored stages.
+                injection_flagged = 1
             if data.get("stage") != sid:
                 continue
             if ev["type"] == "guard.violation":
@@ -901,6 +968,7 @@ class Engine:
             "budget_status": budget_status,
             "check_failures": check_failures,
             "attempt_number": attempt,
+            "injection_flagged": injection_flagged,
         }
 
     @staticmethod
