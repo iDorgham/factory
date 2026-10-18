@@ -498,6 +498,7 @@ class Kernel:
         self._doctor_budgets(report)
         self._doctor_sandbox(report)
         self._doctor_risk(report)
+        self._doctor_injection(report)
 
         for proj_dir in sorted(self.projects_dir.iterdir()):
             if not proj_dir.is_dir():
@@ -818,6 +819,50 @@ class Kernel:
             report["warnings"].append(
                 f"Risk thresholds are not monotonically increasing: "
                 f"{medium} > {high}")
+
+    def _doctor_injection(self, report: dict) -> None:
+        """Injection configuration integrity (P2 injection handling).
+
+        Read-only, order-stable; factory.json is re-read from disk at check
+        time:
+
+        - the ``injection`` section must validate against
+          ``injection.schema.json`` — authoritative, because a corrupt
+          injection config means the kernel cannot detect injection reliably;
+        - a pattern id colliding with a baseline kernel-owned id — error:
+          config cannot override or weaken kernel-owned patterns;
+        - zero (or negative) weight patterns — advisory: such a pattern
+          never fires, so it contributes nothing to detection.
+        """
+        from .injection import BASELINE_IDS
+
+        cfg = read_json(self.root / "factory.json", {}) or {}
+        section = cfg.get("injection")
+        if section is None:
+            return  # absent -> kernel defaults valid by construction
+        if not isinstance(section, dict) or not section:
+            self._fail(report, "factory.json injection is schema-invalid: "
+                       "must be a non-empty object")
+            return
+        try:
+            self.schemas.validate("injection", section)
+        except SchemaError as e:
+            self._fail(report,
+                       f"factory.json injection is schema-invalid: {e}")
+            return
+
+        for entry in section.get("patterns") or []:
+            pid = entry.get("id") if isinstance(entry, dict) else None
+            if pid in BASELINE_IDS:
+                self._fail(report,
+                           f"factory.json injection pattern id '{pid}' is "
+                           f"kernel-owned and cannot be overridden")
+            weight = entry.get("weight", 0) if isinstance(entry, dict) else 0
+            if (isinstance(weight, int) and not isinstance(weight, bool)
+                    and weight <= 0):
+                report["warnings"].append(
+                    f"Injection pattern '{pid}' has weight {weight} — "
+                    f"it will never fire")
 
     def _doctor_job(self, report: dict, proj_dir: Path, job_dir: Path, now: datetime) -> None:
         label = f"{proj_dir.name}/{job_dir.name}"

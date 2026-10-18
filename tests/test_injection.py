@@ -6,8 +6,8 @@ risk signal fed into risk.compute_score; the band->action map is
 unchanged.
 
 Schema tests are green at landing (schemas exist from Step 3.1).
-Pure-function and engine-wiring tests are deliberately red — they
-specify the implementation for the next slices.
+Pure-function and engine-wiring tests were red before Step 3.4 and are now
+green.
 """
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ class TestInjectionSchema:
 
 
 # ----------------------------------------------------------------------
-# Pure function tests (red — injection.py does not exist yet)
+# Pure function tests (green after Step 3.3 — injection.py exists)
 # ----------------------------------------------------------------------
 
 
@@ -209,7 +209,7 @@ class TestInjectionSignal:
 
 
 # ----------------------------------------------------------------------
-# Engine wiring tests (red — engine wiring does not exist yet)
+# Engine wiring tests (green after Step 3.4 — engine wiring exists)
 # ----------------------------------------------------------------------
 
 
@@ -307,3 +307,62 @@ class TestEngineInjection:
             job_dir.glob("stages/*/attempt-*/injection.json"))
         assert len(verdict_files) > 0, \
             "engine must write injection verdict file even on config error"
+
+
+# ----------------------------------------------------------------------
+# Doctor integrity tests (green after Step 3.5 — _doctor_injection exists)
+# ----------------------------------------------------------------------
+
+
+class TestDoctorInjection:
+    def test_doctor_flags_invalid_injection_section(self, kernel):
+        import json
+        cfg_path = kernel.root / "factory.json"
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg["injection"] = {}
+        cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+        report = kernel.doctor()
+        assert report["ok"] is False
+        assert any(
+            e.startswith("factory.json injection is schema-invalid:")
+            for e in report["errors"]
+        ), report["errors"]
+
+    def test_doctor_rejects_kernel_owned_pattern_id(self, kernel):
+        import json
+        cfg_path = kernel.root / "factory.json"
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg["injection"] = {
+            "patterns": [{"id": "ignore-previous-instructions",
+                          "pattern": r"(?i)ignore everything"}]
+        }
+        cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+        report = kernel.doctor()
+        assert report["ok"] is False
+        assert any(
+            e.startswith(
+                "factory.json injection pattern id '"
+                "ignore-previous-instructions' is kernel-owned"
+            )
+            for e in report["errors"]
+        ), report["errors"]
+
+    def test_doctor_warns_on_zero_weight_patterns(self, kernel):
+        import json
+        cfg_path = kernel.root / "factory.json"
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg["injection"] = {
+            "patterns": [{"id": "custom-injection", "pattern": "custom",
+                          "weight": 0}]
+        }
+        cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+        report = kernel.doctor()
+        assert report["ok"] is True
+        assert any(
+            w.startswith("Injection pattern 'custom-injection' has weight "
+                         "0 — it will never fire")
+            for w in report["warnings"]
+        ), report["warnings"]
