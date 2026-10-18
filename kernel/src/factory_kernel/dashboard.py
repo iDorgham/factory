@@ -132,6 +132,7 @@ def _timeline(kernel, job) -> list[dict]:
     rounds: dict[str, int] = {}
     guard_notes: dict[str, dict] = {}
     budget_notes: dict[str, dict] = {}
+    injection_notes: dict[str, dict] = {}
     for ev in events:
         if ev["type"] == "stage.attempt_started":
             sid = ev["data"].get("stage")
@@ -154,6 +155,14 @@ def _timeline(kernel, job) -> list[dict]:
             if not prev or data.get("attempt", 0) >= prev["attempt"]:
                 budget_notes[sid] = {
                     "hard": ev["type"] == "budget.hard_exceeded", "data": data}
+        elif ev["type"] == "injection.detected":
+            # Latest injection verdict per stage, by attempt number.
+            data = ev["data"]
+            sid = data.get("stage")
+            prev = injection_notes.get(sid)
+            if not prev or data.get("attempt", 0) >= prev["attempt"]:
+                injection_notes[sid] = {
+                    "attempt": data.get("attempt", 0), "data": data}
 
     accepted_ids = [s["id"] for s in stages if s["id"] in accepted]
     if job.get("state") == "awaiting_human" and accepted_ids:
@@ -210,6 +219,16 @@ def _timeline(kernel, job) -> list[dict]:
             "id": f"{sid}:budget", "phrase": phrase, "status": status,
             "round": None, "rounds": None,
         })
+    # Injection verdicts read the same way (P2 injection handling): what was
+    # flagged, where, in plain language with a red dot.
+    for sid, note in sorted(injection_notes.items(),
+                            key=lambda item: order.get(item[0], len(stages))):
+        data = note["data"]
+        phrase = _injection_violation_phrase(data)
+        timeline.append({
+            "id": f"{sid}:injection", "phrase": phrase, "status": "failed",
+            "round": None, "rounds": None,
+        })
     return timeline
 
 
@@ -241,6 +260,31 @@ def _guard_violation_phrase(data: dict) -> str:
     if paths:
         return f"⚠ Guard flagged {what} in {paths[0]}"
     return f"⚠ Guard flagged {what}"
+
+
+# Plain-language words per injection pattern id. Unknown ids fall back to the
+# raw pattern id, so a new pattern is never rendered as an empty sentence.
+INJECTION_PATTERN_WORDS = {
+    "ignore-previous-instructions": "an attempt to override prior instructions",
+    "system-prompt-leak": "a request to reveal the system prompt",
+    "do-not-follow": "an instruction to ignore prior guidance",
+    "pretend-to-be": "an attempt to impersonate a different assistant",
+}
+
+
+def _injection_violation_phrase(data: dict) -> str:
+    what = INJECTION_PATTERN_WORDS.get(
+        data.get("pattern_id"), data.get("pattern_id") or "unwanted instruction")
+    item_path = data.get("item_path") or ""
+    excerpt = data.get("matched_excerpt") or ""
+    stage = data.get("stage") or ""
+    if item_path and excerpt:
+        return (f"⚠ Injection pattern flagged in stage '{stage}' "
+                f"({item_path}: '{excerpt}')")
+    if item_path:
+        return (f"⚠ Injection pattern flagged in stage '{stage}' "
+                f"({item_path}: {what})")
+    return f"⚠ Injection pattern flagged in stage '{stage}' ({what})"
 
 
 def _needs_you(kernel, job) -> Optional[dict]:
