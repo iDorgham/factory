@@ -52,6 +52,68 @@ def test_needs_you_card_binds_to_checkpoint_sha(demo_job):
     assert actions == {"approve", "change", "explain"}
 
 
+def test_player_absent_without_active_job(demo_job):
+    kernel, job = demo_job
+    # A freshly created job is pending, which the player treats as active;
+    # cancel it so no active job remains.
+    kernel.job_cancel(job["id"])
+    view = build_view(kernel)
+    assert view["player"] is None
+
+
+def test_player_pending_job_shows_zero_progress(demo_job):
+    kernel, job = demo_job
+    player = build_view(kernel)["player"]
+    assert player["job"] == job["id"]
+    assert player["brief"] == "Build a landing page"
+    assert player["project"] == "demo"
+    assert player["state"] == "pending"
+    assert player["done"] == 0
+    assert player["total"] > 0
+    assert player["pct"] == 0
+    assert player["stage_phrase"] == "Understanding your request"
+    assert player["needs_you"] is False
+    assert player["can_resume"] is True
+    assert player["can_stop"] is True
+
+
+def test_player_running_job_tracks_active_stage(demo_job):
+    kernel, job = demo_job
+    kernel.job_execute(job["id"])
+    player = build_view(kernel)["player"]
+    # The lite profile parks at the human gate: all but the active step done.
+    assert player["state"] == "awaiting_human"
+    assert player["needs_you"] is True
+    assert player["done"] == player["total"] - 1
+    assert player["stage_phrase"] == "Ready for you"
+
+
+def test_player_progress_excludes_verdict_rows(demo_job):
+    kernel, job = demo_job
+    kernel.job_execute(job["id"])
+    view = build_view(kernel)
+    player = view["player"]
+    stage_rows = [s for s in view["timeline"] if ":" not in s["id"]]
+    assert player["total"] == len(stage_rows)
+    assert player["done"] == sum(1 for s in stage_rows if s["status"] == "done")
+
+
+def test_render_html_contains_player(demo_job):
+    kernel, job = demo_job
+    html = render_html(build_view(kernel), live=True)
+    assert 'id="player"' in html
+    assert "player-bar" in html
+
+
+def test_player_controls_are_static_nodes(demo_job):
+    """Rebuilt-per-tick buttons drop in-flight clicks (stream redraws ~1/s)."""
+    kernel, job = demo_job
+    html = render_html(build_view(kernel), live=True)
+    for cid in ("p-resume", "p-need", "p-stop"):
+        assert f'id="{cid}"' in html
+    assert '$("p-controls").innerHTML' not in html
+
+
 def test_undo_reports_unavailable(demo_job):
     kernel, job = demo_job
     view = build_view(kernel)

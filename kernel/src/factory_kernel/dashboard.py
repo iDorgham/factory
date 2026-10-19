@@ -507,6 +507,7 @@ def build_view(kernel, project: Optional[str] = None) -> dict:
         "estimate": _estimate(kernel),
         "active_job": None,
         "timeline": [],
+        "player": None,
         "needs_you": None,
         "preview": None,
         "undo": {"available": False,
@@ -519,10 +520,46 @@ def build_view(kernel, project: Optional[str] = None) -> dict:
         detail = kernel.job_status(active["id"])
         view["active_job"] = _job_summary(detail)
         view["timeline"] = _timeline(kernel, detail)
+        view["player"] = _player(_job_summary(detail), view["timeline"])
         view["needs_you"] = _needs_you(kernel, detail)
         view["preview"] = _preview(kernel, detail)
         view["undo"] = _undo_state(detail)
     return view
+
+
+def _player(job: dict, timeline: list[dict]) -> Optional[dict]:
+    """Sticky-footer player model for the active job (Spotify-style).
+
+    Progress counts only real stages — guard/budget/injection verdict rows
+    carry a ":" in their id and never move the bar.
+    """
+    if not job:
+        return None
+    if job.get("state") in ("completed", "cancelled", "superseded", "archived"):
+        return None
+    stages = [s for s in timeline if ":" not in s["id"]]
+    total = len(stages)
+    done = sum(1 for s in stages if s["status"] == "done")
+    active = next((s for s in stages if s["status"] == "active"), None)
+    if active is not None:
+        done = min(done, total - 1)
+    pct = round(done * 100 / total) if total else 0
+    state = job.get("state", "")
+    return {
+        "job": job["id"],
+        "brief": job.get("brief", ""),
+        "project": job.get("project"),
+        "state": state,
+        "state_phrase": _state_phrase(state),
+        "stage_phrase": active["phrase"] if active else _state_phrase(state),
+        "done": done,
+        "total": total,
+        "pct": pct,
+        "needs_you": state in NEEDS_YOU_STATES,
+        "can_resume": state in ("pending", "paused", "blocked", "stalled", "failed"),
+        "can_stop": state in ("pending", "running", "awaiting_human",
+                              "blocked", "stalled", "paused", "failed"),
+    }
 
 
 def _undo_state(job: dict) -> dict:
@@ -722,6 +759,29 @@ _TEMPLATE = r"""<!DOCTYPE html>
   td, th { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
   .err { color:var(--warn); font-size:13px; min-height:18px; }
   code { background:#12151b; padding:1px 6px; border-radius:6px; font-size:12px; }
+  .player { position:fixed; left:0; right:0; bottom:0; background:#161920;
+            border-top:1px solid var(--line); padding:10px 16px; z-index:50; }
+  .player-bar { max-width:1100px; margin:0 auto; display:flex; align-items:center;
+                gap:18px; }
+  .p-track { display:flex; align-items:center; gap:10px; width:280px; min-width:0; }
+  .p-glyph { width:34px; height:34px; border-radius:8px; background:var(--accent);
+             display:flex; align-items:center; justify-content:center;
+             color:#0b0d12; font-size:16px; flex:none; }
+  .p-glyph.needs { background:var(--warn); }
+  .p-glyph.stalled { background:#d64545; }
+  .p-meta { min-width:0; }
+  .p-brief { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden;
+             text-overflow:ellipsis; }
+  .p-progress { flex:1; min-width:120px; }
+  .p-bar { height:6px; border-radius:999px; background:var(--line); overflow:hidden; }
+  .p-fill { height:100%; background:var(--accent); width:0%; transition:width .4s; }
+  .p-stage { font-size:12px; color:var(--muted); margin-top:4px; }
+  .p-controls { display:flex; gap:8px; flex:none; }
+  .p-controls button { padding:7px 12px; font-size:13px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .p-glyph.spin { animation:pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.55; } }
+  }
 </style>
 </head>
 <body>
@@ -784,9 +844,31 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="err" id="err"></div>
 </div>
 
+<footer class="player" id="player" style="display:none">
+  <div class="player-bar">
+    <div class="p-track">
+      <div class="p-glyph" id="p-glyph">▶</div>
+      <div class="p-meta">
+        <div class="p-brief" id="p-brief"></div>
+        <span class="pill" id="p-project"></span>
+      </div>
+    </div>
+    <div class="p-progress">
+      <div class="p-bar"><div class="p-fill" id="p-fill"></div></div>
+      <div class="p-stage" id="p-stage"></div>
+    </div>
+    <div class="p-controls">
+      <button id="p-resume">Resume</button>
+      <button id="p-need" class="secondary">Needs you</button>
+      <button id="p-stop" class="secondary">Stop</button>
+    </div>
+  </div>
+</footer>
+
 <script>
 const LIVE = __LIVE__;
 let VIEW = __VIEW__;
+let PLAYER = null;
 const $ = (id) => document.getElementById(id);
 const api = (path) => path;
 const esc = (s) => (s == null ? "" : String(s)).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
@@ -890,6 +972,34 @@ function render(v) {
     `<tr><td>${esc(j.brief).slice(0,48)}</td><td>${esc(j.project)}</td>` +
     `<td>${esc(j.state_phrase)}</td><td class="muted">${esc((j.updated_at||"").slice(0,19))}</td></tr>`
   ).join("");
+
+  renderPlayer(v);
+}
+
+function renderPlayer(v) {
+  const el = $("player");
+  const p = LIVE ? v.player : null;
+  PLAYER = p;
+  if (!p) { el.style.display = "none"; document.body.style.paddingBottom = ""; return; }
+  el.style.display = "block";
+  document.body.style.paddingBottom = "84px";
+
+  const glyph = $("p-glyph");
+  glyph.textContent = p.needs_you ? "!" : (p.state === "running" ? "▶" : "⏸");
+  glyph.className = "p-glyph" + (p.needs_you ? " needs" : "")
+    + (p.state === "running" ? " spin" : "")
+    + (p.state === "stalled" || p.state === "failed" ? " stalled" : "");
+  $("p-brief").textContent = p.brief;
+  $("p-brief").title = p.state_phrase;
+  $("p-project").textContent = p.project || "";
+  $("p-fill").style.width = p.pct + "%";
+  $("p-stage").textContent = `${p.stage_phrase} · ${p.done}/${p.total}`;
+
+  // Controls are static nodes toggled by visibility: rebuilding them per
+  // stream tick would drop an in-flight click.
+  $("p-resume").hidden = !p.can_resume;
+  $("p-need").hidden = !p.needs_you;
+  $("p-stop").hidden = !p.can_stop;
 }
 
 async function send(payload, then) {
@@ -935,6 +1045,9 @@ $("sample").onclick = () => send({command: "create_sample"});
 $("undo").onclick = () => {
   if (VIEW.undo && VIEW.undo.available) send({command: "undo", job_id: VIEW.undo.job});
 };
+$("p-resume").onclick = () => PLAYER && send({command: "execute", job_id: PLAYER.job});
+$("p-stop").onclick = () => PLAYER && send({command: "cancel", job_id: PLAYER.job});
+$("p-need").onclick = () => $("needs-card").scrollIntoView({behavior:"smooth", block:"center"});
 
 async function refresh() {
   try {
