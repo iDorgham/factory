@@ -863,18 +863,21 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="err" id="err"></div>
 </div>
 
-<footer class="player" id="player" style="display:none">
+<footer class="player" id="player" role="region" aria-label="Active task" style="display:none">
   <div class="player-bar">
     <div class="p-track">
-      <div class="p-glyph" id="p-glyph">▶</div>
+      <div class="p-glyph" id="p-glyph" aria-hidden="true">▶</div>
       <div class="p-meta">
         <div class="p-brief" id="p-brief"></div>
         <span class="pill" id="p-project"></span>
       </div>
     </div>
     <div class="p-progress">
-      <div class="p-bar"><div class="p-fill" id="p-fill"></div></div>
-      <div class="p-stage" id="p-stage"></div>
+      <div class="p-bar" id="p-bar" role="progressbar" aria-label="Task progress"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="p-fill" id="p-fill" aria-hidden="true"></div>
+      </div>
+      <div class="p-stage" id="p-stage" role="status" aria-live="polite"></div>
     </div>
     <div class="p-controls">
       <button id="p-resume">Resume</button>
@@ -1012,6 +1015,10 @@ function renderPlayer(v) {
   $("p-brief").title = p.state_phrase;
   $("p-project").textContent = p.project || "";
   $("p-fill").style.width = p.pct + "%";
+  // The bar is decorative; the progressbar role carries the value so a screen
+  // reader hears "3 of 5 stages" rather than an unlabelled coloured strip.
+  $("p-bar").setAttribute("aria-valuenow", String(p.pct));
+  $("p-bar").setAttribute("aria-valuetext", `${p.done} of ${p.total} stages`);
   $("p-stage").textContent = `${p.stage_phrase} · ${p.done}/${p.total}`;
 
   // Controls are static nodes toggled by visibility: rebuilding them per

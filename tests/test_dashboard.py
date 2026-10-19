@@ -209,6 +209,22 @@ def test_export_dashboard_keeps_the_player_footer_read_only(demo_job, tmp_path):
     assert view["player"]["brief"] == "Build a landing page"
 
 
+def test_player_footer_is_perceivable_to_assistive_tech(demo_job):
+    """The footer is the one region a screen reader otherwise cannot perceive:
+    the glyph is decorative, the bar exposes a real progressbar value, and the
+    stage line is a polite live region so "needs you" is announced."""
+    kernel, job = demo_job
+    html = render_html(build_view(kernel), live=True)
+    assert 'role="region" aria-label="Active task"' in html
+    assert 'id="p-glyph" aria-hidden="true"' in html
+    assert 'id="p-bar" role="progressbar"' in html
+    assert 'aria-valuemin="0" aria-valuemax="100"' in html
+    assert 'id="p-stage" role="status" aria-live="polite"' in html
+    # The value reaches the DOM from the streamed model, not the static markup.
+    assert '$("p-bar").setAttribute("aria-valuenow", String(p.pct));' in html
+    assert 'setAttribute("aria-valuetext"' in html
+
+
 def test_render_html_contains_player(demo_job):
     kernel, job = demo_job
     html = render_html(build_view(kernel), live=True)
