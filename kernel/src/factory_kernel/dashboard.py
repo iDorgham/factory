@@ -532,6 +532,11 @@ def _player(job: dict, timeline: list[dict]) -> Optional[dict]:
 
     Progress counts only real stages — guard/budget/injection verdict rows
     carry a ":" in their id and never move the bar.
+
+    The controls and the status line mirror what the *kernel* permits, not what
+    would look reassuring: Resume appears only when `Engine.execute` would run
+    the job, and a job that is waiting on the human (or has stopped) names the
+    reason instead of the stage that happened to be in flight.
     """
     if not job:
         return None
@@ -545,18 +550,28 @@ def _player(job: dict, timeline: list[dict]) -> Optional[dict]:
         done = min(done, total - 1)
     pct = round(done * 100 / total) if total else 0
     state = job.get("state", "")
+    if state in NEEDS_YOU_STATES or state == "failed":
+        stage_phrase = _state_phrase(state)
+    else:
+        stage_phrase = active["phrase"] if active else _state_phrase(state)
     return {
         "job": job["id"],
         "brief": job.get("brief", ""),
         "project": job.get("project"),
         "state": state,
         "state_phrase": _state_phrase(state),
-        "stage_phrase": active["phrase"] if active else _state_phrase(state),
+        "stage_phrase": stage_phrase,
         "done": done,
         "total": total,
         "pct": pct,
         "needs_you": state in NEEDS_YOU_STATES,
-        "can_resume": state in ("pending", "paused", "blocked", "stalled", "failed"),
+        # Resume is offered only where the kernel would actually run the job:
+        # `Engine.execute` accepts pending/running/awaiting_human, and of those
+        # only *pending* is a start — awaiting_human is approved (SHA-bound),
+        # and a running job is already live, so starting it again would double
+        # it up. Blocked jobs continue by answering their question; stalled and
+        # failed jobs have no retry path in this slice.
+        "can_resume": state == "pending",
         "can_stop": state in ("pending", "running", "awaiting_human",
                               "blocked", "stalled", "paused", "failed"),
     }

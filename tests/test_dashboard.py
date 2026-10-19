@@ -2,16 +2,33 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import urllib.request
+from pathlib import Path
+
+import pytest
 
 from factory_kernel.dashboard import (
+    _player,
     build_view,
     dispatch,
     export_dashboard,
     make_server,
     render_html,
 )
+
+ASK_AGENT = Path(__file__).resolve().parent / "fixtures" / "adapters" / "cli-ask-agent.py"
+
+
+@pytest.fixture
+def ask_cmd(monkeypatch):
+    """Point `cli-agent` at the fixture that asks a blocking question."""
+    monkeypatch.setenv("FACTORY_CLI_AGENT_CMD", f'"{sys.executable}" "{ASK_AGENT}"')
+    monkeypatch.delenv("FACTORY_CLI_AGENT_TIMEOUT_S", raising=False)
+    monkeypatch.delenv("FACTORY_FIXTURE_QUESTION", raising=False)
+    monkeypatch.delenv("FACTORY_FIXTURE_OPTIONS", raising=False)
+    return monkeypatch
 
 
 def test_build_view_empty_state(kernel):
@@ -96,6 +113,75 @@ def test_player_progress_excludes_verdict_rows(demo_job):
     stage_rows = [s for s in view["timeline"] if ":" not in s["id"]]
     assert player["total"] == len(stage_rows)
     assert player["done"] == sum(1 for s in stage_rows if s["status"] == "done")
+
+
+# ----------------------------------------------------------------------
+# The footer must only offer what the kernel will actually do.
+# ----------------------------------------------------------------------
+
+
+def _stages(*statuses):
+    """A lite-profile timeline with the given per-stage statuses."""
+    named = [("understand", "Understanding your request"), ("plan", "Planning"),
+             ("build", "Building"), ("verify", "Checking"),
+             ("approve", "Ready for you")]
+    return [{"id": sid, "phrase": phrase, "status": statuses[i],
+             "round": None, "rounds": None}
+            for i, (sid, phrase) in enumerate(named)]
+
+
+def _state_only(state):
+    return {"id": "01JOB", "project": "demo", "brief": "b", "state": state}
+
+
+def test_player_resume_only_where_the_kernel_would_run_it():
+    """`Engine.execute` accepts only pending/running/awaiting_human, and of
+    those only *pending* is a start — the footer must not advertise an action
+    the kernel refuses (`Job is 'blocked'; cannot execute`)."""
+    timeline = _stages("active", "todo", "todo", "todo", "todo")
+    for state, expected in [
+        ("pending", True),
+        ("running", False),        # already live — a second start would double it
+        ("awaiting_human", False),  # approved (SHA-bound), never re-executed
+        ("blocked", False),        # continues by answering, not by resuming
+        ("stalled", False),
+        ("paused", False),
+        ("failed", False),
+    ]:
+        assert _player(_state_only(state), timeline)["can_resume"] is expected, state
+
+
+def test_player_status_line_states_why_when_it_needs_you_or_failed():
+    """The ambient line names the reason, not whichever stage was in flight,
+    so it agrees with the glyph and the Needs you card."""
+    active = _stages("done", "done", "active", "todo", "todo")
+    assert _player(_state_only("blocked"), active)["stage_phrase"] == "I need an answer"
+    assert _player(_state_only("stalled"), active)["stage_phrase"] == "I'm stuck"
+    assert _player(_state_only("failed"), active)["stage_phrase"] == "I couldn't finish"
+    assert _player(_state_only("running"), active)["stage_phrase"] == "Building"
+
+
+def test_player_absent_for_every_terminal_state():
+    done = _stages("done", "done", "done", "done", "done")
+    for state in ("completed", "cancelled", "superseded", "archived"):
+        assert _player(_state_only(state), done) is None
+
+
+def test_player_handles_blocked_question(kernel, ask_cmd):
+    """A blocked job's footer says it is waiting, and offers Stop — Resuming
+    would be rejected by the kernel until the question is answered."""
+    kernel.project_create("q", mode="solo", domain="web")
+    job = kernel.job_run("q", "Build a landing page")
+    ask_cmd.setenv("FACTORY_FIXTURE_QMODE", "once")
+    parked = kernel.job_execute(job["id"], adapter_id="cli-agent")
+    assert parked["state"] == "blocked"
+
+    player = build_view(kernel)["player"]
+    assert player["state"] == "blocked"
+    assert player["needs_you"] is True
+    assert player["stage_phrase"] == "I need an answer"
+    assert player["can_resume"] is False
+    assert player["can_stop"] is True
 
 
 def test_render_html_contains_player(demo_job):
