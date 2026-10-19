@@ -34,7 +34,8 @@ Use these fixtures rather than reimplementing setup.
 
 ## 3. Current coverage map
 
-**423 collected** at `d933adf` (the close of P2.5): **421 passed, 2 skipped, 0 failed** — fully green.
+**436 collected** at `77f32e9` (the task player's review round): **434 passed, 2 skipped, 0 failed** —
+fully green.
 The 2 skips are capability-gated conformance cases, not red contracts. If the suite is red on your
 checkout of an in-progress slice, the failing test names are the next step's written contract, not
 regressions; see [TDD-red slices](#4-tdd-red-slices-are-a-technique-not-an-accident).
@@ -66,8 +67,9 @@ regressions; see [TDD-red slices](#4-tdd-red-slices-are-a-technique-not-an-accid
 | `budgets.py` | `test_budgets.py` | 24 | pricing, unpriced-usage error, soft/hard resolution, inclusive boundaries |
 | `sandbox.py` | `test_sandbox.py` | 27 | schema validation, env sanitization, path containment, policy parsing, subprocess cwd/env contract, sandboxed engine run, doctor sandbox checks |
 | `risk.py` | `test_risk.py` | 37 | `risk_scoring` schema/config contracts, signal scoring, ceiling bands, kernel-owned actions, config loading, engine gate wiring with `risk.computed`, doctor risk checks |
-| `injection.py` | `test_injection.py` | 30 | `injection` schema contracts, kernel-owned baseline patterns, config loading, item scanning, manifest labeling, `injection.detected` events, the `injection_flag` risk signal, doctor injection checks |
+| `injection.py` | `test_injection.py` | 30 | `injection` schema contracts, kernel-owned baseline patterns, config loading, item scanning, manifest labeling, `injection.detected` events, the `injection_flagged` signal (weighted by `injection_flag`), doctor injection checks |
 | `provenance.py` | `test_provenance.py` | 23 | trailer detection, grandfathering, allowlist, CLI |
+| `cancel.py` | `test_cancel.py` | 8 | cancellable runs, process-tree termination, a cancelled job ending `cancelled` with the adapter dead |
 
 Fixtures live in `tests/fixtures/adapters/`: `slow` (cancel/resume/heartbeat), `fake-browser.py`
 (a stdlib headless-browser shim with a theme mapping *inverted* relative to the dev Edge, so the

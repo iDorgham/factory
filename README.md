@@ -21,7 +21,7 @@
 > [!NOTE]
 > **Status:** P0 ✅ · P1 ✅ · P2 🚧 (P2.1 guards → P2.2 budgets → P2.3 sandbox → P2.4 risk gates →
 > P2.5 injection handling landed) · P3 planned
-> — verified 2026-10-19 at commit `d933adf` with **423 tests collected, 421 passed, 2 skipped,
+> — verified 2026-10-19 with **436 tests collected, 434 passed, 2 skipped,
 > 0 failed**. This is a **runnable reference implementation** of a written specification, not a
 > hosted product.
 >
@@ -72,14 +72,16 @@ The factory takes the opposite position: **the agent is untrusted input, not a t
 | 💰 **Budgets & metering** | Reported usage is priced against a per-tier table in `factory.json`. Soft breach notifies; hard breach fails the attempt and stops the retry loop. |
 | 🧊 **Sandbox boundary** | Adapter subprocesses see only an allowlisted environment (plus kernel-reserved `FACTORY_*` attribution) and start inside the job worktree. |
 | 📊 **Deterministic risk scoring** | A weighted sum over kernel-observed signals (guard violations, check failures, budget status, retries, injection flags) resolves a gate to `auto_advance` / `awaiting_human` / `blocked`. No model opinion is an input. |
-| 🧯 **Injection detection** | Untrusted manifest items are scanned with kernel-owned baseline patterns. A match labels the manifest entry, records a hash-chained `injection.detected` event, and raises the `injection_flag` risk signal — the kernel-owned band→action map decides what happens next. |
+| 🧯 **Injection detection** | Untrusted manifest items are scanned with kernel-owned baseline patterns. A match labels the manifest entry, records a hash-chained `injection.detected` event, and raises the `injection_flagged` signal (weighted by `injection_flag`) — the kernel-owned band→action map decides what happens next. |
 | 🖼️ **Real visual evidence** | Stdlib-only headless Edge/Chrome capture at declared viewports in light + dark themes, bound to the checkpoint SHA, with honest `changed_pct` diffs. |
 | 🔀 **Isolated, mergeable work** | Per-job git worktree on `factory/<job-id>`, content-addressed checkpoints, a serialized `--no-ff` merge queue, and one-command **Undo**. |
 | 🧑 **Solo question budget** | At most 3 blocking questions per job, persisted as events, answerable in one click, with both sides reaching future attempts. |
 | 🔌 **Bring your own agent** | Adapters are the *only* tool-specific code. `cli-agent` forwards the contract to any external command. |
 | 📋 **Conformance suite** | New adapters must pass `factory adapter test` before acceptance — capability-gated cases skip honestly. |
 | 🩺 **`factory doctor`** | Verifies the hash chain end to end, repairs snapshots, validates kernel-owned policy, and audits guard/budget/sandbox/risk/injection config integrity. |
-| 🔍 **Machine-verified provenance** | Every commit records the AI tool and model that wrote it; `factory provenance verify` (also run in CI) proves it. |
+| 🎛️ **Ambient task player** | A sticky footer bound to the active job: status glyph, brief, stage progress, and the Resume / Needs-you / Stop controls, reachable from any scroll position. It offers only the actions the kernel will actually run. |
+| 🛑 **Stop really stops** | Cancelling a job kills the adapter's **process tree** and skips the checks; the pipeline writes nothing after the operator's own state change. No work keeps running behind a cancelled label. |
+| 🔍 **Machine-verified provenance** | Commits from P2.1 onward record the AI tool and model that wrote them; `factory provenance verify` (also run in CI) proves them. The pre-convention P0/P1 history is owner-attested, not machine-verified. |
 
 ### 🎯 Ten non-negotiable principles
 
@@ -106,7 +108,7 @@ The factory takes the opposite position: **the agent is untrusted input, not a t
 | 🧠 Kernel modules | 23 pure-ish Python modules in `kernel/src/factory_kernel/` |
 | 📐 JSON Schemas | 10 — every file format is validated on write |
 | 🎛️ Stage profiles | `lite` (Solo, 5 steps) · `standard` (Team/Enterprise, 11 steps) |
-| 🧪 Test suite | **423 collected — 421 passed, 2 skipped, 0 failed** across 27 modules |
+| 🧪 Test suite | **436 collected — 434 passed, 2 skipped, 0 failed** across 28 modules |
 | 🔌 Adapters | `echo` (deterministic) · `cli-agent` (live) · `visual-capture` (check producer) |
 | 🎭 Role contracts | 5 starter roles in `roles/` |
 | ⏱️ Runtime dependencies | **2** — `PyYAML` and `jsonschema` |
@@ -138,13 +140,14 @@ pip install -e ".[dev]"
 ```
 
 That installs the kernel, `pytest`, and `flake8`, and maps the `factory` console script. Prefer
-no-install? The `./factory` launcher adds `kernel/src` to the path itself, so `./factory doctor` works
-on a bare clone.
+no-install? The `./factory` launcher adds `kernel/src` to the path itself, so it runs from a bare
+clone — but the kernel's runtime dependencies (`PyYAML`, `jsonschema`) still have to be present, so
+either `pip install -e .` or an environment that already provides them is required.
 
 ### 2️⃣ Verify the install
 
 ```bash
-python -m pytest          # 423 tests, ~3.5 min
+python -m pytest          # 436 tests, ~4 min
 python -m flake8 kernel/src tests
 ./factory doctor          # ok: no jobs
 ```
@@ -245,20 +248,42 @@ guessing, and the dashboard renders the question with one-click options:
 #     [1] Full-bleed   [2] Above the fold   [3] Centered
 
 ./factory job answer <job-id> q-hero "Full-bleed" --adapter cli-agent
-./factory job execute <job-id>    # resumes; both Q&A reach future attempts via questions.md
+#   the answer is recorded, appended to questions.md, and the job resumes itself —
+#   both Q&A reach future attempts via questions.md
 ```
 
 ### 🪙 Wiring a real coding agent
 
-`cli-agent` forwards the NDJSON run contract to **any** external command:
+`cli-agent` forwards the NDJSON run contract to **any** external command. The command runs in the
+job worktree and receives:
+
+- the **run request as JSON on stdin** (`brief`, `stage`, `produces`, `attempt_dir`, …),
+- `FACTORY_BRIEF` and `FACTORY_ATTEMPT_DIR` in the environment,
+- the job to write the declared contract files: every name in `produces`, under
+  `<attempt_dir>/outputs/`.
+
+There is **no `{prompt}` placeholder** — the command is not templated, so a command that expects
+one receives the literal text. A wrapper that reads the request and writes the declared files is
+all it takes:
 
 ```bash
-# Windows PowerShell
-$env:FACTORY_CLI_AGENT_CMD = "opencode run --print-logs {prompt}"
-./factory job execute <job-id> --adapter cli-agent
+cat > agent.py <<'PY'
+import json, pathlib, sys
+req = json.load(sys.stdin)                       # the run request
+out = pathlib.Path(req["attempt_dir"]) / "outputs"
+out.mkdir(parents=True, exist_ok=True)
+for name in req["produces"]:
+    if name.startswith("git:") or name.endswith("/"):
+        continue
+    (out / name).write_text(f"# {name}\n\nBrief: {req['brief']}\n")
+print(json.dumps({"type": "done"}))
+PY
 
 # POSIX
-export FACTORY_CLI_AGENT_CMD="claude -p"
+export FACTORY_CLI_AGENT_CMD="python $PWD/agent.py"
+# Windows PowerShell
+$env:FACTORY_CLI_AGENT_CMD = "python $PWD/agent.py"
+
 ./factory job execute <job-id> --adapter cli-agent
 ```
 
@@ -356,8 +381,8 @@ history to make a metadata claim look better would contradict the project's own 
 | **P2.2** Budgets | `budget`/`price_table` schemas, cost meter, engine enforcement, doctor checks | OpenCode | GLM-5.3-Flash Free | **Machine-verified** |
 | **P2.3** Sandbox | `factory.schema.json`, `sandbox.py`, sandboxed adapter invocation, doctor checks | OpenCode | GLM-5.3-Flash Free | **Machine-verified** |
 | **P2.4** Risk gates | `risk.schema.json`, `risk.py`, `risk.computed`, engine gate resolution | OpenCode | GLM-5.3-Flash Free | **Machine-verified** |
-| **P2.5** Injection handling | `injection.schema.json`, `injection.py`, `injection.detected`, engine + dashboard + doctor wiring | OpenCode | GLM-5.3-Flash Free | **Machine-verified** |
-| **P1.1** Solo dashboard task player | Sticky task-player footer, honest action states, read-only export, ARIA semantics | OpenCode | Big Pickle | Owner-attested |
+| **P2.5** Injection handling | `injection.schema.json`, `injection.py`, `injection.detected`, engine + dashboard + doctor wiring | Kilo Code | kilo-auto/free | **Machine-verified** |
+| **P1.1** Solo dashboard task player | Sticky task-player footer, honest action states, read-only export, ARIA semantics | Qoder (`a8697f1`), then OpenCode (the three follow-ups) | Qoder, then Big Pickle | **Machine-verified** (per-commit trailers) |
 
 ### 🧬 Methodology: TDD-red slices
 
@@ -585,7 +610,8 @@ contracts *before* the implementation:
 | P2.3 sandbox complete | 341 / 343 |
 | P2.4 risk gates | 378 / 380 |
 | P2.5 injection handling | 421 / 423 |
-| **Solo dashboard task player (HEAD `d933adf`)** | **421 / 423** |
+| Solo dashboard task player (implementation baseline `d933adf`) | 421 / 423 |
+| Player fixes + real cancellation of work in flight | 434 / 436 |
 
 **Commit timeline highlights:** `d328d49` P0 skeleton → `fd06130` engine → `9398dfe` worktrees &
 merge → `3e1b55b` P1 complete → `f5815b9` P2.1 contracts → `9948840` budget meter → `08980ed`

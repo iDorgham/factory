@@ -17,6 +17,8 @@ readable against [the roadmap](docs/plans/ROADMAP.md).
 | **P1 — Solo slice** | `0.5.0` | ✅ Complete — release pending (version bump + tag not cut yet) |
 | **P2 — Trust layer** | `0.6.0` | 🚧 In progress — P2.1–P2.5 landed; safety floor and import-with-baseline open |
 | **P3 — Learning** | `0.7.0` | ⬜ Planned — the Step 3 slice (lessons ledger, memory hygiene, minimal eval harness) is designed, not built |
+| **P4 — Team** | `0.8.0` | ⬜ Planned — more adapters via conformance, epics + dependencies, visual baselines, named users |
+| **P5 — Enterprise** | `0.9.0` | ⬜ Planned — control plane, RBAC, hash-chained audit + anchors, brand design systems, compliance export |
 
 ## [Unreleased]
 
@@ -85,12 +87,15 @@ readable against [the roadmap](docs/plans/ROADMAP.md).
     `< medium` → medium, else high), `gate_action` (kernel-owned map), `assess` (one verdict dict
     whose score/band/action cite the same checked numbers), `load_risk_config` (absent → documented
     defaults; present-but-empty or malformed → `RiskError`).
-  - Engine wiring: `risk_scored`/`if_risk_above:*` gates compute the verdict over **stage-scoped**
-    signals ("the road to this pass" — violations and check failures of the stage's earlier rounds
-    plus the winning attempt's retries and budget verdict), then resolve: `low → auto`,
-    `medium → require_human` (job parked awaiting_human at the gate), `high → blocked`
-    (deterministic failure). A `RiskError` fails the job deterministically — a broken config can
-    never degrade into a silently loosened gate.
+  - Engine wiring: the `risk_scored` gate computes the verdict over **stage-scoped** signals
+    ("the road to this pass" — violations and check failures of the stage's earlier rounds
+    plus the winning attempt's retries and budget verdict), then resolves through the
+    kernel-owned band→action map: `low → auto`, `medium → require_human` (job parked
+    awaiting_human at the gate), `high → blocked` (deterministic failure). The
+    `if_risk_above:*` gates compare the computed band to the named level instead —
+    `if_risk_above:medium` auto-advances a `low` or `medium` band and waits for a human on
+    `high`; it never blocks, and it never ignores the score. A `RiskError` fails the job
+    deterministically — a broken config can never degrade into a silently loosened gate.
   - Doctor: `risk_scoring` schema-validity and `gate_actions` overrides are authoritative errors;
     zero weights and non-monotonic thresholds are advisories.
 
@@ -195,6 +200,38 @@ readable against [the roadmap](docs/plans/ROADMAP.md).
 
 #### P1 — Solo slice (`0.5.0`, complete — release pending)
 
+- **Stop really stops the work (P1.1 review round)** — the task player's Stop control marked the job
+  `cancelled` while its adapter process kept running: the agent went on editing files and spending
+  money after the operator was told the job had stopped, and the engine could still run checks
+  afterwards. Cancellation is now real:
+  - `kernel/src/factory_kernel/cancel.py` — a cancellable run loop with a deadline and a cancel
+    predicate, plus process-tree termination (a POSIX process group, a Windows `taskkill /T`), so an
+    agent that spawned a shell does not outlive the adapter it belongs to.
+  - `adapters.py` — the adapter runs under that loop; a cancelled run reports the new `cancelled`
+    error class instead of a verdict about the code.
+  - `checks.py` — the check runner runs under the same loop and reports `cancelled` (not "failed").
+  - `engine.py` — the engine polls the job's own state and the lease fence: a cancel kills the work
+    in flight, skips the checks, and unwinds without writing another event, because every later write
+    would carry a fencing token the operator has superseded.
+  - `dashboard.py` — the footer tracks *unfinished* work (a freshly finished job no longer hides a
+    pending one), a pending job plays the play glyph instead of the pause glyph, a paused job names
+    the pause instead of the stage it was in, and the footer stacks on narrow screens so the Stop
+    control stays reachable.
+
+- **Solo dashboard task player (P1)** — the Solo view only showed progress when you scrolled to the
+  timeline, so an operator browsing the page had no ambient signal of what the factory was doing or
+  when it needed them. A sticky footer bound to the active job now carries a status glyph, the
+  brief, stage progress, and Resume / Needs-you / Stop controls that stay reachable from any scroll
+  position. The controls are static nodes toggled by visibility rather than rebuilt per stream tick
+  — an early version recreated them on every frame and swallowed an in-flight click, which the live
+  check caught. The footer offers only the actions the kernel will actually run (`Engine.execute`
+  accepts `pending` / `running` / `awaiting_human`; approving is SHA-bound and separate), names the
+  reason when the job needs the human instead of the active stage, renders in the read-only export
+  (a click there lands on the export's "Read-only export" note, the same contract as the Undo
+  button), and carries real accessibility semantics: a labelled region with a `role=progressbar`
+  (value from the streamed model, as both `aria-valuenow` and a "3 of 5 stages" `valuetext`) and a
+  polite live status, so a "needs you" transition is announced rather than merely drawn.
+
 - **Real visual capture producer (P1)** — `adapters/visual-capture/capture.py` drives headless
   Edge/Chrome (stdlib-only) to take actual screenshots at declared viewports in light + dark themes,
   writing genuine `visual.json` evidence into attempt outputs (`synthetic: false`, bound to the
@@ -269,19 +306,6 @@ readable against [the roadmap](docs/plans/ROADMAP.md).
   brief/requires + project memory under token budgets with degradation; `adapters.py` discovers
   adapters, loads manifests, selects by capability/role, and speaks the NDJSON subprocess contract
   with error classification. CLI: `factory job execute`, `factory job approve`.
-- **Solo dashboard task player (P1)** — the Solo view only showed progress when you scrolled to the
-  timeline, so an operator browsing the page had no ambient signal of what the factory was doing or
-  when it needed them. A sticky footer bound to the active job now carries a status glyph, the
-  brief, stage progress, and Resume / Needs-you / Stop controls that stay reachable from any scroll
-  position. The controls are static nodes toggled by visibility rather than rebuilt per stream tick
-  — an early version recreated them on every frame and swallowed an in-flight click, which the live
-  check caught. The footer offers only the actions the kernel will actually run (`Engine.execute`
-  accepts `pending` / `running` / `awaiting_human`; approving is SHA-bound and separate), names the
-  reason when the job needs the human instead of the active stage, renders in the read-only export
-  (a click there lands on the export's "Read-only export" note, the same contract as the Undo
-  button), and carries real accessibility semantics: a labelled region with a `role=progressbar`
-  (value from the streamed model, as both `aria-valuenow` and a "3 of 5 stages" `valuetext`) and a
-  polite live status, so a "needs you" transition is announced rather than merely drawn.
 - Documentation set under `docs/`, organized by category:
   - `product/` — [PRD](docs/product/PRD.md)
   - `architecture/` — [Architecture](docs/architecture/ARCHITECTURE.md)

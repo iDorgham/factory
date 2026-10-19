@@ -1,15 +1,17 @@
 # Project History
 
 Complete development history of the Enterprise AI Software Factory, reconstructed from `git log` and the
-repository contents. Snapshot date: **2026-10-17**.
+repository contents. Snapshot date: **2026-10-19**.
 
-- **Repository:** local git repo (no upstream remote), branch `master`, HEAD `9948840`, 19 commits.
+- **Repository:** GitHub repo `github.com/iDorgham/factory` (public), branches `master` and
+  `feat/dashboard-task-player` (PR #1), HEAD `8a390c0`, 42 commits.
 - **Author of all commits:** `iDorgham` (`yasser.dorgham@gmail.com`).
-- **Dates:** 8 commits on 2026-10-16 (the P0 + P1 build day), 11 on 2026-10-17 (P1 hardening, P2.1, P2.2).
+- **Dates:** 8 commits on 2026-10-16 (the P0 + P1 build day), 20 on 2026-10-17 (P1 hardening, P2.1,
+  P2.2), 8 on 2026-10-18 (P2.3, P2.4), 6 on 2026-10-19 (P2.5, the task player, the docs set).
 - **Tooling:** the owner attests that **P0 and P1 were developed with OpenCode using the Big Pickle model**
   (not machine-verified; those commits predate the provenance convention). From P2.1 onward the tool and
   model are recorded per commit in `AI-Tool` / `AI-Model` trailers and enforced by hook + CI
-  (see [AI-PROVENANCE.md](AI-PROVENANCE.md)).
+  (see [AI-PROVENANCE.md](../AI-PROVENANCE.md)).
 
 > Note on a discrepancy: the `README.md` and docs that existed before the documentation reorganization
 > described the project as "P0 complete, P1 planned." The git history shows P1 work had already landed.
@@ -460,7 +462,7 @@ defensive copies), `scan_item` (regex match, excerpt truncated at 80 chars, conf
    because a tunable detection set that could *remove* the baseline would let configuration
    negotiate the safety floor away — the same reasoning that keeps the risk band→action map out of
    config.
-2. **No new enforcement path.** A detection becomes the `injection_flag` risk signal and the
+2. **No new enforcement path.** A detection becomes the `injection_flagged` signal (weighted by `injection_flag`) and the
    **existing** band→action map decides (low → auto-advance, medium → park for a human, high →
    blocked). The kernel gained no new way to stop a job; it gained a new *observation*.
 3. **Detection runs on manifest untrusted items, before the adapter sees them** — not on adapter
@@ -483,9 +485,9 @@ Section schema validity is authoritative; a config pattern id colliding with a k
 is an authoritative error naming the ownership violation; zero-weight patterns are advisories
 (sorted by pattern id). Read-only, order-stable, re-reading `factory.json` from disk.
 
-### The Solo dashboard task player (2026-10-19)
+## P1.1 — Solo dashboard task player (2026-10-19)
 
-Four commits on `feat/dashboard-task-player`, all in the Solo dashboard:
+Commits on `feat/dashboard-task-player` (PR #1), all in the Solo dashboard:
 
 - `a8697f1` — a sticky task-player footer bound to the active job (status glyph, brief, stage
   progress, and Resume / Needs-you / Stop controls that stay reachable from any scroll position).
@@ -506,8 +508,21 @@ Four commits on `feat/dashboard-task-player`, all in the Solo dashboard:
   real `role=progressbar` (value from the streamed model, as both `aria-valuenow` and a "3 of 5
   stages" `valuetext`) and a polite live status, so a "needs you" transition is announced instead
   of merely drawn.
+- `77f32e9` — the review round, and the one that found a real defect: **Stop did not stop the
+  work.** `job_cancel` changed the saved state while the adapter process kept running, so the
+  agent went on editing files and spending money after the operator was told the job had stopped.
+  - `kernel/src/factory_kernel/cancel.py` — process-tree termination (a POSIX process group, a
+    Windows `taskkill /T`) and a cancellable run loop with a deadline and a cancel predicate.
+  - `adapters.py` / `checks.py` — the adapter and the check runner run under that loop; a
+    cancelled run reports the new `cancelled` error class instead of a verdict.
+  - `engine.py` — the engine polls the job's own state and the lease fence, so a cancel kills the
+    work in flight, skips the checks, and writes nothing after the operator's own state change.
+  - `dashboard.py` — the footer tracks *unfinished* work (a freshly finished job no longer hides a
+    pending one), a pending job plays the play glyph instead of the pause glyph, a paused job
+    names the pause instead of the stage it was in, and the footer stacks on narrow screens so the
+    Stop control stays reachable.
 
-**Closing suite at `d933adf`:** **423 collected — 421 passed, 2 skipped** — fully green; flake8
+**Closing suite at `77f32e9`:** **436 collected — 434 passed, 2 skipped** — fully green; flake8
 clean.
 
 ---

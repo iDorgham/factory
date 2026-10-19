@@ -1,7 +1,7 @@
 # P2 — Trust Layer Plan
 
 **Phase:** P2
-**Status:** 🚧 In progress (P2.1 guards landed 2026-10-17; **P2.2 budgets landed 2026-10-17** — schemas, cost meter, engine enforcement, doctor checks, suite fully green; **P2.3 sandbox hardening landed 2026-10-17** — global-config schema, pure sanitization/containment, sandboxed adapter invocation, doctor checks; **P2.4 risk-scored gates landed 2026-10-18** — `risk_scoring` config schema, pure weighted scoring with ceiling bands, kernel-owned band→action map, `risk.computed` on the record, stage-scoped signals, doctor checks; **P2.5 prompt-injection handling landed 2026-10-19** — `injection` config schema with kernel-owned baseline patterns, pure detector, manifest labeling, `injection.detected` events, the `injection_flag` risk signal, dashboard rows, doctor checks. Next: safety-floor hardening, import with baseline)
+**Status:** 🚧 In progress (P2.1 guards landed 2026-10-17; **P2.2 budgets landed 2026-10-17** — schemas, cost meter, engine enforcement, doctor checks, suite fully green; **P2.3 sandbox hardening landed 2026-10-17** — global-config schema, pure sanitization/containment, sandboxed adapter invocation, doctor checks; **P2.4 risk-scored gates landed 2026-10-18** — `risk_scoring` config schema, pure weighted scoring with ceiling bands, kernel-owned band→action map, `risk.computed` on the record, stage-scoped signals, doctor checks; **P2.5 prompt-injection handling landed 2026-10-19** — `injection` config schema with kernel-owned baseline patterns, pure detector, manifest labeling, `injection.detected` events, the `injection_flagged` signal (weighted by `injection_flag`), dashboard rows, doctor checks. Next: safety-floor hardening (P2.6 — the last P3 blocker), then import with baseline (P2.7 — deferred, not a P3 blocker))
 **Goal:** Make it safe to leave running: budgets enforced, anti-cheating guards active, sandbox hardened, risk-scored gates in place, and honest baselines on import.
 
 **Depends on:** [P1](P1-solo-slice.md) demonstrably reliable.
@@ -58,26 +58,38 @@ from `ae7fc58` likewise — fully green at `878629b`: 409 collected — 407 pass
 ### 4. Risk-scored gates
 - [x] Risk score from deterministic signals *(P2.4, as scoped for P2: the kernel-owned set — guard violations, check failures, retries, and the budget verdict, aggregated stage-scoped over "the road to this pass" — drives the score; the spec's wider aspirational list (diff size, sensitive paths, new dependencies, scope drift, external effects, history, skill maturity) stays future scope, with `scope_guard` raising signals once it exists)*
       *(profiles already declare `gate: risk_scored` on `verify`; the computation now exists — `risk.computed` records score, band, action, and the exact signals)*
-- [x] Score bands → `auto | notify | require_human | require_role` per preset; projects may tighten, not loosen (loosening audited, Team+) *(P2.4 partially: ceiling bands land kernel-global with `low → auto_advance`, `medium → awaiting_human`, `high → blocked`; per-preset band profiles and the Team+ tighten-only/loosening-audit machinery remain open — deliberately, so no project config can loosen the Solo safety floor)*
-- [x] Gate config shape (spec §14.2); safety floor remains non-disableable *(P2.4: `risk_scoring` weights + thresholds schema-shaped and doctor-checked; the band→action map is kernel-owned and rejected outright in config — the floor cannot be negotiated away)*
+- [x] Ceiling bands land kernel-global: `low → auto_advance`, `medium → awaiting_human`, `high → blocked`; the band→action map is kernel-owned, so no project config can loosen the Solo floor *(P2.4)*
+- [ ] Per-preset band profiles (`auto | notify | require_human | require_role`) and the Team+ tighten-only / loosening-audit machinery *(deliberately deferred: the kernel-global ceiling bands already keep Solo safe, and a preset-specific map could only widen the floor)*
+- [ ] Gate config shape (spec §14.2) *(P2.4 shipped the narrower part — the `risk_scoring` weights and thresholds are schema-shaped and doctor-checked, and the band→action map is rejected outright in config — but the spec's full §14.2 `gates` object is not in the whole-config schema yet)*
 
 ### 5. Prompt-injection handling
-- [x] Untrusted inputs (issues, READMEs, web pages, imported repos) wrapped and labeled as data in the manifest
+- [x] Untrusted inputs (issues, READMEs) wrapped and labeled as data in the manifest *(P2.5)*
+- [ ] Web pages and imported repos wrapped and labeled as data *(no import path exists yet — see §7 — and the kernel fetches no web pages today)*
 - [x] Sensitive actions gated by the kernel, never by agent judgment
-- [x] Injection fixture in the conformance suite; spec success criterion #11 as a test
+- [x] Injection fixture in the conformance suite; spec success criterion #11 as a test *(the `injected_instruction` case runs in `factory adapter test` and asserts the adapter produced the contract and left the kernel's state intact)*
       *(P2.5 landed the detection half: the kernel's own baseline patterns flag untrusted manifest
       items before the adapter sees them, the manifest entry is labeled, an `injection.detected`
-      event is recorded, and the `injection_flag` signal feeds the existing band→action map — the
+      event is recorded, and the `injection_flagged` signal feeds the existing band→action map — the
       kernel gained an observation, not a new enforcement path. Still open: wrapping *all* untrusted
-      sources (web pages, imported repos) and the spec's injection fixture in the conformance suite.)*
+      sources — web pages and imported repos.)*
 
-### 6. Safety floor hardening
+### 6. Safety floor hardening (P2.6 — the last P3 blocker)
 - [ ] Human gate on irreversible `effects: external` stages *(every stage in `lite.yaml` is currently `effects: local`)*
 - [ ] Destructive operations outside the worktree blocked
 - [ ] Agents cannot edit policy, budget, role, or kernel files
 - [ ] Audit events always written for approvals, policy overrides, external effects
 
-### 7. Import with baseline verification
+### 7. Import with baseline verification (P2.7 — deferred; not a P3 blocker)
+
+*Deferred by decision, not by omission: P3 may start once §6 lands.* The reasoning — every trust
+guarantee in P2.1–P2.6 (guards, budgets, sandbox, risk, injection, the safety floor) applies to
+every job the kernel runs, whatever route the project entered by. What §7 adds is an *entry path*
+(`factory project import`) that clones a project and records an honest pre-existing-failure
+baseline. Until it exists there is no import path at all: a project is created locally and its
+baseline is whatever the first job's own check run reports — never a green claim the kernel did
+not observe. No P3 work depends on the import path, so deferring it weakens no guarantee; it
+delays a convenience. It is tracked here, and it stays open until it ships.
+
 - [ ] `factory project import <path-or-url>`: clone/link, detect stack, run build/lint/type/test as **baseline** (pre-existing failures recorded, never claimed green)
 - [ ] Infer `checks.json` from scripts + CI; confirm ambiguity
 - [ ] Build initial memory: `repo-map.json`, first `conventions.md`, draft `decisions.md` (marked inferred)
@@ -89,4 +101,4 @@ from `ae7fc58` likewise — fully green at `878629b`: 409 collected — 407 pass
 - No job exceeds its hard budget; every job's cost is visible (spec success criterion #4). — *met: enforced since P2.2 (`budget.json` verdict per attempt, breach events, hard stop breaks the retry loop, job → `failed` as an absolute stop)*
 - Guards catch test deletion, check tampering, and lockfile surprises in tests. — *partially met: deletion and lockfile pairing have tests; `no_check_tampering` does not exist*
 - An injected-instruction fixture does not cause a gated action.
-- Imported projects report an honest baseline including pre-existing failures.
+- Imported projects report an honest baseline including pre-existing failures. — *not met; deferred to P2.7 (see §7). Until the import path exists, no project is imported and no baseline is claimed.*

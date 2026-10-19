@@ -183,8 +183,9 @@ closed to agents).
 **Threat model mitigations** — current state, honestly marked: prompt injection → untrusted wrapping +
 kernel-evaluated gates ✅ (the gate side is real as of P2.4 — kernel-evaluated, score-driven gates
 decide by computed band, never agent judgment; P2.5 adds detection: kernel-owned baseline patterns
-flag untrusted manifest items, the manifest entry is labeled, and the `injection_flag` signal feeds
-the same band→action map — the conformance injection fixture remains open) ·
+flag untrusted manifest items, the manifest entry is labeled, and the `injection_flagged` signal feeds
+the same band→action map — the conformance suite's `injected_instruction` case runs and passes;
+wrapping *every* untrusted source — web pages, imported repos — is still open) ·
 secret exfiltration → no secrets in env ⚠️ + `no_secret_in_diff` ✅ + egress allowlist ❌ ·
 dependency attacks → `no_lockfile_surprise` ✅, risk scoring ✅ as of P2.4 (install scripts /
 allowlists still spec'd) · test tampering → `no_test_deletion` ✅, `no_check_tampering` ❌ ·
@@ -224,10 +225,10 @@ Files plus a single-host kernel comfortably handle hundreds of active jobs per p
 
 ---
 
-## Appendix — implemented vs. target at `d933adf`
+## Appendix — implemented vs. target at `77f32e9`
 
-The suite is **423 collected — 421 passed, 2 skipped, 0 failed** — fully green at the close of P2.5
-(the 2 skips are capability-gated conformance cases).
+The suite is **436 collected — 434 passed, 2 skipped, 0 failed** — fully green after the task
+player's review round (the 2 skips are capability-gated conformance cases).
 
 | Capability | State |
 |------------|-------|
@@ -242,6 +243,7 @@ The suite is **423 collected — 421 passed, 2 skipped, 0 failed** — fully gre
 | Budget cost meter + schemas | ✅ implemented (24 cases): pricing, limits, engine enforcement (verdict file, breach events, hard stop), doctor checks |
 | Sandbox: env sanitization, lexical path containment, worktree-locked adapter cwd, doctor integrity | ✅ implemented (27 cases); container isolation and network/resource-limit enforcement are not yet |
 | Risk-scored gates | ✅ implemented (37 cases): `risk_scoring` config schema + defaults, pure weighted-signal scoring with ceiling bands, kernel-owned band→action map, stage-scoped "road to this pass" signals, `risk.computed` verdict on the record, doctor integrity checks; per-preset band profiles and the spec's wider aspirational signal set (diff size, sensitive paths, scope drift, …) are not yet |
-| Prompt-injection handling | ✅ implemented (30 cases): `injection` config schema, kernel-owned baseline patterns (config may only add), pure `injection.py` detector, manifest `injection_flags` labeling, `injection.detected` events, `injection_flag` risk signal, dashboard verdict rows, doctor integrity checks; the spec's wrapping of *all* untrusted sources (web pages, imported repos) and the conformance injection fixture are not yet |
+| Prompt-injection handling | ✅ implemented (30 cases): `injection` config schema, kernel-owned baseline patterns (config may only add), pure `injection.py` detector, manifest `injection_flags` labeling, `injection.detected` events, `injection_flagged` signal (weighted by `injection_flag`), dashboard verdict rows, doctor integrity checks; the conformance suite's `injected_instruction` case runs and passes, but the spec's wrapping of *all* untrusted sources (web pages, imported repos) is not yet |
+| Operator cancellation of work in flight | ✅ implemented (8 cases): process-tree termination, cancellable adapter and check runs, a cancelled job ending `cancelled` with the pipeline writing nothing after the operator's own state change |
 | Skill packages, evals, lessons, memory compounding | ❌ P3 |
 | RBAC, hash-chained audit + anchors, brands, compliance export | ❌ P5 |
