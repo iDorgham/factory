@@ -52,6 +52,9 @@ STATE_PHRASES = {
 
 NEEDS_YOU_STATES = ("awaiting_human", "blocked", "stalled")
 
+# A job in one of these states has nothing left to play: the footer hides it.
+TERMINAL_STATES = ("completed", "cancelled", "superseded", "archived")
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -520,11 +523,31 @@ def build_view(kernel, project: Optional[str] = None) -> dict:
         detail = kernel.job_status(active["id"])
         view["active_job"] = _job_summary(detail)
         view["timeline"] = _timeline(kernel, detail)
-        view["player"] = _player(_job_summary(detail), view["timeline"])
+        view["player"] = _player_view(kernel, jobs)
         view["needs_you"] = _needs_you(kernel, detail)
         view["preview"] = _preview(kernel, detail)
         view["undo"] = _undo_state(detail)
     return view
+
+
+def _player_view(kernel, jobs: list[dict]) -> Optional[dict]:
+    """The player model for the job the sticky footer should play.
+
+    The footer tracks *unfinished* work. `_pick_active` ranks a finished job
+    in the same bucket as a pending one (both are "everything else", newest
+    first), so a job that just completed could win — and a terminal job has
+    no player, so the footer would vanish while work was still queued.
+    """
+    job = _pick_player(jobs)
+    if job is None:
+        return None
+    detail = kernel.job_status(job["id"])
+    return _player(_job_summary(detail), _timeline(kernel, detail))
+
+
+def _pick_player(jobs: list[dict]) -> Optional[dict]:
+    """The most urgent job that is still unfinished (the footer's job)."""
+    return _pick_active([j for j in jobs if j.get("state") not in TERMINAL_STATES])
 
 
 def _player(job: dict, timeline: list[dict]) -> Optional[dict]:
@@ -540,7 +563,7 @@ def _player(job: dict, timeline: list[dict]) -> Optional[dict]:
     """
     if not job:
         return None
-    if job.get("state") in ("completed", "cancelled", "superseded", "archived"):
+    if job.get("state") in TERMINAL_STATES:
         return None
     stages = [s for s in timeline if ":" not in s["id"]]
     total = len(stages)
@@ -550,7 +573,7 @@ def _player(job: dict, timeline: list[dict]) -> Optional[dict]:
         done = min(done, total - 1)
     pct = round(done * 100 / total) if total else 0
     state = job.get("state", "")
-    if state in NEEDS_YOU_STATES or state == "failed":
+    if state in NEEDS_YOU_STATES or state in ("failed", "paused"):
         stage_phrase = _state_phrase(state)
     else:
         stage_phrase = active["phrase"] if active else _state_phrase(state)
@@ -797,6 +820,18 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .p-stage { font-size:12px; color:var(--muted); margin-top:4px; }
   .p-controls { display:flex; gap:8px; flex:none; }
   .p-controls button { padding:7px 12px; font-size:13px; }
+  /* The footer is fixed to the bottom, so the page has to reserve room for
+     it — and the reservation has to follow the footer's own height, which
+     changes when the layout stacks on a narrow screen. */
+  body.has-player { padding-bottom: 96px; }
+  @media (max-width: 640px) {
+    .player { padding:8px 12px; }
+    .player-bar { flex-wrap:wrap; gap:10px; }
+    .p-track { width:auto; flex:1 1 100%; }
+    .p-progress { flex:1 1 100%; min-width:0; }
+    .p-controls { flex:1 1 100%; justify-content:flex-end; }
+    body.has-player { padding-bottom: 150px; }
+  }
   @media (prefers-reduced-motion: no-preference) {
     .p-glyph.spin { animation:pulse 1.4s ease-in-out infinite; }
     @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.55; } }
@@ -1002,12 +1037,15 @@ function renderPlayer(v) {
   const el = $("player");
   const p = v.player;
   PLAYER = p;
-  if (!p) { el.style.display = "none"; document.body.style.paddingBottom = ""; return; }
+  if (!p) { el.style.display = "none"; document.body.classList.remove("has-player"); return; }
   el.style.display = "block";
-  document.body.style.paddingBottom = "84px";
+  document.body.classList.add("has-player");
 
   const glyph = $("p-glyph");
-  glyph.textContent = p.needs_you ? "!" : (p.state === "running" ? "▶" : "⏸");
+  // A pending job is a job that has not started yet ("Start"), so it plays
+  // the play glyph — only a job that is actually mid-flight spins.
+  const playing = p.state === "pending" || p.state === "running";
+  glyph.textContent = p.needs_you ? "!" : (playing ? "▶" : "⏸");
   glyph.className = "p-glyph" + (p.needs_you ? " needs" : "")
     + (p.state === "running" ? " spin" : "")
     + (p.state === "stalled" || p.state === "failed" ? " stalled" : "");

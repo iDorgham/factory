@@ -5,23 +5,24 @@ entrypoint. The kernel invokes the entrypoint as a subprocess, passes the run
 request as JSON on stdin, and reads an NDJSON event stream on stdout.
 
 Events: progress | tool_use | file_written | question | usage | heartbeat |
-done | error. Errors are classified transient | capability | budget | fatal.
+done | error. Errors are classified transient | capability | budget | fatal |
+cancelled.
 
 The kernel owns retries; adapters only report.
 """
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 from .atomic import read_json
+from .cancel import run_cancellable
 
 # Highest-severity error class seen in a run (used for retry/routing decisions).
-ERROR_CLASSES = {"transient", "capability", "budget", "fatal"}
+ERROR_CLASSES = {"transient", "capability", "budget", "fatal", "cancelled"}
 
 
 class AdapterError(Exception):
@@ -63,7 +64,8 @@ class Adapter:
         return list(self.manifest.get("roles_supported", []))
 
     def run(self, request: dict, timeout: int = 600,
-            cwd: Optional[Path] = None, env: Optional[dict] = None) -> RunResult:
+            cwd: Optional[Path] = None, env: Optional[dict] = None,
+            cancel: Optional[Callable[[], bool]] = None) -> RunResult:
         """Run the adapter entrypoint.
 
         ``cwd``/``env`` are the sandbox channel (P2.3): the engine passes a
@@ -71,22 +73,31 @@ class Adapter:
         Defaults preserve the pre-sandbox behavior — adapter directory and
         the inheriting process env — which the operator-side conformance
         harness (a trusted tool run by the operator) keeps using.
+
+        ``cancel`` is polled while the adapter runs: when it returns True the
+        adapter process *and its children* are killed and the run reports the
+        ``cancelled`` error class. Without it, a stopped job would keep its
+        agent working and billing after the operator pressed Stop.
         """
         entry = (self.dir / self.manifest["entrypoint"]).resolve()
         if not entry.exists():
             raise AdapterError(f"Adapter entrypoint missing: {entry}")
 
-        try:
-            proc = subprocess.run(
-                [sys.executable, str(entry)],
-                input=json.dumps(request),
-                capture_output=True,
-                text=True,
-                cwd=str(cwd) if cwd is not None else str(self.dir),
-                **({"env": dict(env)} if env is not None else {}),
-                timeout=timeout,
+        outcome = run_cancellable(
+            [sys.executable, str(entry)],
+            input=json.dumps(request),
+            cwd=str(cwd) if cwd is not None else str(self.dir),
+            env=dict(env) if env is not None else None,
+            timeout=timeout,
+            cancel=cancel,
+        )
+        if outcome.cancelled:
+            return RunResult(
+                ok=False,
+                error="cancelled by operator",
+                error_class="cancelled",
             )
-        except subprocess.TimeoutExpired:
+        if outcome.timed_out:
             return RunResult(
                 ok=False,
                 error=f"adapter '{self.id}' timed out",
@@ -94,7 +105,7 @@ class Adapter:
             )
 
         events: list[dict] = []
-        for line in (proc.stdout or "").splitlines():
+        for line in (outcome.stdout or "").splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -119,12 +130,12 @@ class Adapter:
                 cls = ev.get("class") or ev.get("error_class") or "fatal"
                 error_class = cls if cls in ERROR_CLASSES else "fatal"
 
-        if proc.returncode != 0 and not ok:
+        if outcome.returncode != 0 and not ok:
             if error is None:
-                error = (proc.stderr or "").strip() or f"adapter exited {proc.returncode}"
+                error = (outcome.stderr or "").strip() or f"adapter exited {outcome.returncode}"
                 # A negative return code means the process was killed by a signal
                 # (or, on Windows, terminated) — treat as a transient interruption.
-                error_class = error_class or ("transient" if proc.returncode < 0 else "fatal")
+                error_class = error_class or ("transient" if outcome.returncode < 0 else "fatal")
 
         return RunResult(ok=ok, events=events, usage=usage, error=error, error_class=error_class)
 

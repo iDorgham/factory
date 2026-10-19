@@ -294,20 +294,20 @@ class TestAdapterSubprocess:
         return Adapter(adapter_dir)
 
     def test_explicit_env_replaces_inherited_env(self, tmp_path, monkeypatch):
-        from types import SimpleNamespace
-
         import json as _json
+
+        from factory_kernel.cancel import ProcOutcome
 
         captured = {}
 
         def fake_run(cmd, **kwargs):
             captured.update(kwargs)
-            # CompletedProcess-like: the adapter parses stdout as NDJSON.
-            return SimpleNamespace(
+            # The adapter parses stdout as NDJSON.
+            return ProcOutcome(
                 stdout=_json.dumps({"type": "done"}) + "\n",
                 stderr="", returncode=0)
 
-        monkeypatch.setattr("factory_kernel.adapters.subprocess.run", fake_run)
+        monkeypatch.setattr("factory_kernel.adapters.run_cancellable", fake_run)
         adapter = self._adapter(tmp_path)
         request = {"attempt_dir": str(tmp_path / "attempt")}
 
@@ -318,25 +318,26 @@ class TestAdapterSubprocess:
         assert captured["env"] == {"PATH": "/usr/bin"}
 
     def test_defaults_preserve_today_behavior(self, tmp_path, monkeypatch):
-        from types import SimpleNamespace
-
         import json as _json
+
+        from factory_kernel.cancel import ProcOutcome
 
         captured = {}
 
         def fake_run(cmd, **kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(
+            return ProcOutcome(
                 stdout=_json.dumps({"type": "done"}) + "\n",
                 stderr="", returncode=0)
 
-        monkeypatch.setattr("factory_kernel.adapters.subprocess.run", fake_run)
+        monkeypatch.setattr("factory_kernel.adapters.run_cancellable", fake_run)
         adapter = self._adapter(tmp_path)
 
         adapter.run({"attempt_dir": str(tmp_path / "attempt")})
 
         assert captured["cwd"] == str(adapter.dir)
-        assert "env" not in captured  # operator-side conformance inherits
+        # operator-side conformance inherits the environment
+        assert captured["env"] is None
 
 
 # ----------------------------------------------------------------------

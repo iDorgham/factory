@@ -13,13 +13,13 @@ Conditional checks are not treated as required in this reference slice.
 from __future__ import annotations
 
 import os
-import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 from .atomic import read_json
+from .cancel import run_cancellable
 
 MAX_OUTPUT_LINES = 40
 
@@ -38,6 +38,7 @@ class CheckResult:
     output: str
     duration_s: float
     timed_out: bool = False
+    cancelled: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -47,6 +48,7 @@ class CheckResult:
             "exit_code": self.exit_code,
             "passed": self.passed,
             "timed_out": self.timed_out,
+            "cancelled": self.cancelled,
             "duration_s": round(self.duration_s, 3),
             "output": self.output,
         }
@@ -79,37 +81,45 @@ def run_one(
     worktree: Union[str, Path],
     timeout: int = 600,
     extra_env: Optional[dict] = None,
+    cancel: Optional[Callable[[], bool]] = None,
 ) -> CheckResult:
     cmd = spec.get("cmd", "")
     required = _is_required(spec.get("required"))
     start = time.monotonic()
     timed_out = False
-    try:
-        proc = subprocess.run(
-            cmd,
-            shell=True,
-            cwd=str(worktree),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env={**os.environ, **(extra_env or {})},
-        )
-        exit_code: Optional[int] = proc.returncode
-        output = (proc.stdout or "") + (proc.stderr or "")
-    except subprocess.TimeoutExpired:
+    cancelled = False
+    outcome = run_cancellable(
+        cmd,
+        shell=True,
+        cwd=str(worktree),
+        timeout=timeout,
+        env={**os.environ, **(extra_env or {})},
+        cancel=cancel,
+    )
+    if outcome.cancelled:
+        # The operator stopped the job: the check's process tree is dead and
+        # the result is "cancelled", not a verdict about the code.
+        cancelled = True
+        exit_code = None
+        output = f"check '{check_id}' cancelled by operator"
+    elif outcome.timed_out:
         exit_code = None
         timed_out = True
         output = f"check '{check_id}' timed out after {timeout}s"
+    else:
+        exit_code = outcome.returncode
+        output = (outcome.stdout or "") + (outcome.stderr or "")
     duration = time.monotonic() - start
     return CheckResult(
         id=check_id,
         cmd=cmd,
         required=required,
         exit_code=exit_code,
-        passed=(exit_code == 0) and not timed_out,
+        passed=(exit_code == 0) and not timed_out and not cancelled,
         output=_trim(output),
         duration_s=duration,
         timed_out=timed_out,
+        cancelled=cancelled,
     )
 
 
@@ -118,6 +128,7 @@ def _run_required_checks(
     worktree: Union[str, Path],
     timeout: int,
     extra_env: Optional[dict] = None,
+    cancel: Optional[Callable[[], bool]] = None,
 ) -> CheckResult:
     """The ``required_checks`` meta-check passes iff every required check passes."""
     required_ids = [
@@ -125,7 +136,8 @@ def _run_required_checks(
         if cid != "required_checks" and spec.get("required") is True
     ]
     inner = [
-        run_one(cid, checks[cid], worktree, timeout, extra_env=extra_env)
+        run_one(cid, checks[cid], worktree, timeout, extra_env=extra_env,
+                cancel=cancel)
         for cid in required_ids
     ]
     failed = [r.id for r in inner if not r.passed]
@@ -137,6 +149,7 @@ def _run_required_checks(
         passed=not failed,
         output="required checks: " + (", ".join(failed) if failed else "all passed"),
         duration_s=sum(r.duration_s for r in inner),
+        cancelled=any(r.cancelled for r in inner),
     )
 
 
@@ -146,6 +159,7 @@ def run_checks(
     worktree: Union[str, Path],
     timeout: int = 600,
     extra_env: Optional[dict] = None,
+    cancel: Optional[Callable[[], bool]] = None,
 ) -> list[CheckResult]:
     """Run the named checks. A declared-but-undefined check is a failure."""
     results: list[CheckResult] = []
@@ -153,7 +167,7 @@ def run_checks(
         if check_id == "required_checks":
             results.append(
                 _run_required_checks(checks, worktree, timeout,
-                                     extra_env=extra_env))
+                                     extra_env=extra_env, cancel=cancel))
             continue
         spec = checks.get(check_id)
         if spec is None:
@@ -170,7 +184,8 @@ def run_checks(
             )
             continue
         results.append(
-            run_one(check_id, spec, worktree, timeout, extra_env=extra_env))
+            run_one(check_id, spec, worktree, timeout, extra_env=extra_env,
+                    cancel=cancel))
     return results
 
 

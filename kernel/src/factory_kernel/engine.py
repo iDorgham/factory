@@ -41,6 +41,15 @@ class EngineError(Exception):
     pass
 
 
+class Cancelled(Exception):
+    """The operator cancelled the job; the pipeline unwinds without writing.
+
+    Raised when the job's state says "cancelled" (the operator pressed Stop)
+    or when the lease was taken over — a newer fencing token means this run
+    has been fenced out and must not write anything else.
+    """
+
+
 def input_hash(manifest: dict, adapter_id: Optional[str]) -> str:
     """Content hash of an attempt's inputs (idempotency key for accepted work).
 
@@ -103,6 +112,12 @@ class Engine:
                 job, job_dir, state, profile, adapters, adapter_id, fence, check_timeout,
                 on_complete,
             )
+        except Cancelled:
+            # The operator stopped the job. Its state already says "cancelled"
+            # and the work in flight has been killed — the pipeline unwinds
+            # here without writing another event, because every write from
+            # here on would carry a fencing token the operator has superseded.
+            return self.k.job_status(job_id)
         finally:
             if lease.current_token() == fence:
                 lease.release(fence)
@@ -129,6 +144,8 @@ class Engine:
         for index, stage in enumerate(stages):
             if stage["id"] in accepted:
                 continue
+            if self._cancel_requested(job_dir, fence):
+                raise Cancelled()
             next_stage = stages[index + 1]["id"] if index + 1 < len(stages) else None
             # A human-requested redo restarts attempts from the reopened stage
             # onward at attempt 1 (discarding the superseded results).
@@ -205,6 +222,8 @@ class Engine:
         start = (max(used) + 1) if used else 1
 
         for attempt in range(start, stage["max_rounds"] + 1):
+            if self._cancel_requested(job_dir, fence):
+                raise Cancelled()
             attempt_dir = base / f"attempt-{attempt}"
             status, fp, new_blocking = self._run_attempt(
                 job, job_dir, state, stage, attempt, attempt_dir, project_dir, worktree,
@@ -391,6 +410,10 @@ class Engine:
         run = self._invoke_adapter(
             adapter, job, stage, attempt, attempt_dir, worktree, manifest, fence
         )
+        if run.error_class == "cancelled":
+            # The operator stopped the job while the adapter was running: the
+            # process tree is already dead. Unwind before anything else runs.
+            raise Cancelled()
         # Adapter questions are durable first-class events: they survive
         # resume, count against the per-job budget, and surface on the
         # dashboard question card (P1 Solo question budget).
@@ -409,7 +432,12 @@ class Engine:
             "FACTORY_VISUAL_OUT": str((attempt_dir / "outputs").absolute()),
         }
         results = run_checks(checks_cfg, stage["checks"], worktree,
-                             timeout=check_timeout, extra_env=checks_env)
+                             timeout=check_timeout, extra_env=checks_env,
+                             cancel=self._cancel_watch(job, fence))
+        if any(r.cancelled for r in results):
+            # Stopped while the checks were running: the pipeline unwinds
+            # instead of recording a verdict nobody asked for.
+            raise Cancelled()
         summary = summarise(results)
         atomic_write_json(attempt_dir / "checks.json", {
             "results": [r.to_dict() for r in results],
@@ -681,9 +709,38 @@ class Engine:
                                cwd=self._sandbox_cwd(policy, worktree),
                                env=self._sandbox_env(policy, job, stage,
                                                      attempt, attempt_dir,
-                                                     worktree))
+                                                     worktree),
+                               cancel=self._cancel_watch(job, fence))
         except AdapterError as e:
             return RunResult(ok=False, error=str(e), error_class="fatal")
+
+    def _cancel_watch(self, job, fence):
+        """A predicate the adapter run polls: True once the job was stopped.
+
+        Polled by the adapter's process loop, so pressing Stop kills the
+        adapter (and its children) instead of merely marking the job.
+        """
+        job_dir = self.k._find_job_dir(job["id"])
+
+        def cancelled() -> bool:
+            return self._cancel_requested(job_dir, fence)
+
+        return cancelled
+
+    def _cancel_requested(self, job_dir, fence) -> bool:
+        """True when the operator stopped the job, or this run was fenced out.
+
+        Two independent signals, both read from disk (the engine runs in
+        another thread than the dashboard that serves Stop):
+        * the job snapshot says "cancelled";
+        * the lease carries a newer fencing token — somebody else owns the
+          job now, so this run must not write anything.
+        """
+        snap = read_json(Path(job_dir) / "job.json") or {}
+        if snap.get("state") == "cancelled":
+            return True
+        token = LeaseManager(job_dir, self.k.actor).current_token()
+        return token is not None and token != fence
 
     def _sandbox_policy(self) -> SandboxPolicy:
         """Parse the sandbox contract from the kernel's config (pure).

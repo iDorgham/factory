@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from factory_kernel.dashboard import (
+    _pick_active,
+    _pick_player,
     _player,
     build_view,
     dispatch,
@@ -167,6 +169,40 @@ def test_player_absent_for_every_terminal_state():
         assert _player(_state_only(state), done) is None
 
 
+def test_player_follows_unfinished_work_when_a_finished_job_is_newer():
+    """A terminal job and a pending job sort into the same bucket in
+    `_pick_active` (both are "everything else", newest first). The view's
+    active job may be the finished one — but the footer must keep playing the
+    work that is still queued instead of disappearing."""
+    jobs = [
+        {"id": "01DONE", "state": "completed",
+         "updated_at": "2026-10-19T10:00:00Z"},
+        {"id": "01PEND", "state": "pending",
+         "updated_at": "2026-10-19T09:00:00Z"},
+    ]
+    assert _pick_active(jobs)["id"] == "01DONE"   # the view's active job
+    assert _pick_player(jobs)["id"] == "01PEND"   # the footer's job
+
+
+def test_player_survives_a_newer_cancelled_job(demo_job):
+    """End to end: a job cancelled after the pending one was created must not
+    take the footer down with it."""
+    kernel, job = demo_job
+    later = kernel.job_run("demo", "Second task")
+    kernel.job_cancel(later["id"])
+
+    player = build_view(kernel)["player"]
+    assert player is not None
+    assert player["job"] == job["id"]
+    assert player["state"] == "pending"
+
+
+def test_player_paused_job_names_the_pause_not_the_stage():
+    """A paused job is not building anything: the ambient line says so."""
+    active = _stages("done", "done", "active", "todo", "todo")
+    assert _player(_state_only("paused"), active)["stage_phrase"] == "Paused"
+
+
 def test_player_handles_blocked_question(kernel, ask_cmd):
     """A blocked job's footer says it is waiting, and offers Stop — Resuming
     would be rejected by the kernel until the question is answered."""
@@ -230,6 +266,28 @@ def test_render_html_contains_player(demo_job):
     html = render_html(build_view(kernel), live=True)
     assert 'id="player"' in html
     assert "player-bar" in html
+
+
+def test_pending_job_plays_the_play_glyph(demo_job):
+    """A pending job is labelled "Start" — it has not run, so it must not
+    wear the pause glyph of a job that is mid-flight."""
+    kernel, job = demo_job
+    html = render_html(build_view(kernel), live=True)
+    assert 'p.state === "pending" || p.state === "running"' in html
+
+
+def test_player_footer_stacks_on_narrow_screens(demo_job):
+    """The footer is fixed to the bottom, so on a narrow viewport the track,
+    the progress and the controls have to stack — otherwise the Stop control
+    is pushed off-screen and cannot be reached."""
+    kernel, job = demo_job
+    html = render_html(build_view(kernel), live=True)
+    assert "@media (max-width: 640px)" in html
+    assert ".player-bar { flex-wrap:wrap" in html
+    # The page reserves room for the footer through a class, so the
+    # reservation can follow the footer's height on each breakpoint.
+    assert "body.has-player { padding-bottom:" in html
+    assert 'document.body.classList.add("has-player");' in html
 
 
 def test_player_controls_are_static_nodes(demo_job):
