@@ -34,7 +34,7 @@ Use these fixtures rather than reimplementing setup.
 
 ## 3. Current coverage map
 
-**436 collected** at `77f32e9` (the task player's review round): **434 passed, 2 skipped, 0 failed** —
+**437 collected** at `77f32e9` (the task player's review round): **435 passed, 2 skipped, 0 failed** —
 fully green.
 The 2 skips are capability-gated conformance cases, not red contracts. If the suite is red on your
 checkout of an in-progress slice, the failing test names are the next step's written contract, not

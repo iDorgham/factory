@@ -227,7 +227,7 @@ Files plus a single-host kernel comfortably handle hundreds of active jobs per p
 
 ## Appendix — implemented vs. target at `77f32e9`
 
-The suite is **436 collected — 434 passed, 2 skipped, 0 failed** — fully green after the task
+The suite is **437 collected — 435 passed, 2 skipped, 0 failed** — fully green after the task
 player's review round (the 2 skips are capability-gated conformance cases).
 
 | Capability | State |

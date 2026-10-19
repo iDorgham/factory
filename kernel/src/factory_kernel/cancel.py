@@ -152,6 +152,10 @@ def run_cancellable(
             return ProcOutcome(returncode=proc.returncode, stdout=out, stderr=err,
                                timed_out=True)
         out, err = _drain(proc, out, err, wait=POLL_SECONDS)
+    # The process has exited: one last read collects everything it wrote.
+    # Without it, output produced between the last poll and the exit would be
+    # lost — and the adapter's last NDJSON event is exactly what says "done".
+    out, err = _drain(proc, out, err)
     return ProcOutcome(returncode=proc.returncode, stdout=out, stderr=err)
 
 
@@ -168,4 +172,7 @@ def _drain(proc: subprocess.Popen, out: str, err: str,
         return out, err
     except (OSError, ValueError):
         return out, err
-    return new_out if new_out is not None else out, new_err if new_err is not None else err
+    if new_out is None and new_err is None:
+        return out, err
+    return (new_out if new_out is not None else out,
+            new_err if new_err is not None else err)

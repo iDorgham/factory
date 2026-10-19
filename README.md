@@ -21,7 +21,7 @@
 > [!NOTE]
 > **Status:** P0 ✅ · P1 ✅ · P2 🚧 (P2.1 guards → P2.2 budgets → P2.3 sandbox → P2.4 risk gates →
 > P2.5 injection handling landed) · P3 planned
-> — verified 2026-10-19 with **436 tests collected, 434 passed, 2 skipped,
+> — verified 2026-10-19 with **437 tests collected, 435 passed, 2 skipped,
 > 0 failed**. This is a **runnable reference implementation** of a written specification, not a
 > hosted product.
 >
@@ -108,7 +108,7 @@ The factory takes the opposite position: **the agent is untrusted input, not a t
 | 🧠 Kernel modules | 23 pure-ish Python modules in `kernel/src/factory_kernel/` |
 | 📐 JSON Schemas | 10 — every file format is validated on write |
 | 🎛️ Stage profiles | `lite` (Solo, 5 steps) · `standard` (Team/Enterprise, 11 steps) |
-| 🧪 Test suite | **436 collected — 434 passed, 2 skipped, 0 failed** across 28 modules |
+| 🧪 Test suite | **437 collected — 435 passed, 2 skipped, 0 failed** across 28 modules |
 | 🔌 Adapters | `echo` (deterministic) · `cli-agent` (live) · `visual-capture` (check producer) |
 | 🎭 Role contracts | 5 starter roles in `roles/` |
 | ⏱️ Runtime dependencies | **2** — `PyYAML` and `jsonschema` |
@@ -147,7 +147,7 @@ either `pip install -e .` or an environment that already provides them is requir
 ### 2️⃣ Verify the install
 
 ```bash
-python -m pytest          # 436 tests, ~4 min
+python -m pytest          # 437 tests, ~4 min
 python -m flake8 kernel/src tests
 ./factory doctor          # ok: no jobs
 ```
@@ -611,7 +611,7 @@ contracts *before* the implementation:
 | P2.4 risk gates | 378 / 380 |
 | P2.5 injection handling | 421 / 423 |
 | Solo dashboard task player (implementation baseline `d933adf`) | 421 / 423 |
-| Player fixes + real cancellation of work in flight | 434 / 436 |
+| Player fixes + real cancellation of work in flight | 435 / 437 |
 
 **Commit timeline highlights:** `d328d49` P0 skeleton → `fd06130` engine → `9398dfe` worktrees &
 merge → `3e1b55b` P1 complete → `f5815b9` P2.1 contracts → `9948840` budget meter → `08980ed`

@@ -522,7 +522,7 @@ Commits on `feat/dashboard-task-player` (PR #1), all in the Solo dashboard:
     names the pause instead of the stage it was in, and the footer stacks on narrow screens so the
     Stop control stays reachable.
 
-**Closing suite at `77f32e9`:** **436 collected — 434 passed, 2 skipped** — fully green; flake8
+**Closing suite at `77f32e9`:** **437 collected — 435 passed, 2 skipped** — fully green; flake8
 clean.
 
 ---

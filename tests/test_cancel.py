@@ -62,6 +62,25 @@ def test_run_cancellable_returns_the_output_of_a_normal_run():
     assert outcome.returncode == 0
 
 
+def test_run_cancellable_collects_the_last_output(tmp_path):
+    """A process that exits between two polls must not lose its last lines:
+    the adapter's final NDJSON event is exactly the one that says "done"."""
+    script = tmp_path / "chatty.py"
+    script.write_text(
+        "import sys\n"
+        "for i in range(500):\n"
+        "    print('line-%d' % i)\n"
+        "sys.stdout.flush()\n",
+        encoding="utf-8",
+    )
+    outcome = run_cancellable(
+        f'"{sys.executable}" "{script}"', shell=True, timeout=30
+    )
+    assert outcome.returncode == 0
+    assert outcome.stdout.count("line-") == 500
+    assert "line-499" in outcome.stdout
+
+
 def test_cancelling_an_adapter_kills_it(tmp_path):
     """The adapter is gone: it never gets to write the file it would have
     written three seconds later."""
