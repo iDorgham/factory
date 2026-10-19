@@ -7,9 +7,9 @@ enforces, agents only propose.
 > code does *today*; the [specification v3.0](specification/Enterprise%20AI%20Software%20Factory%20%E2%80%94%20Specification%20v3.0.md)
 > describes what it *should* do. Where the two differ, the gap is stated rather than papered over.
 
-**Snapshot:** 2026-10-17 at `b3696c6` · **Status:** P0 and P1 complete · P2.1 guards landed · P2.2
-budgets landed · P2.3 sandbox hardening landed · **Suite:** 343 collected (341 passed, 2 skipped —
-fully green after the P2.3 close).
+**Snapshot:** 2026-10-19 at `d933adf` · **Status:** P0 and P1 complete · P2.1 guards landed · P2.2
+budgets landed · P2.3 sandbox hardening landed · P2.4 risk-scored gates landed · P2.5
+prompt-injection handling landed · **Suite:** 423 collected (421 passed, 2 skipped — fully green).
 
 ---
 
@@ -52,7 +52,7 @@ start), [`CHANGELOG.md`](../CHANGELOG.md), [`CONTRIBUTING.md`](../CONTRIBUTING.m
 | [Roadmap](plans/ROADMAP.md) | P0–P5 overview | Active |
 | [P0 Kernel Core](plans/P0-kernel-core.md) | Safe state: events, leases, schemas, doctor | ✅ Implemented |
 | [P1 Solo Slice](plans/P1-solo-slice.md) | Lite profile execution, adapter runtime, build loop, dashboard, worktrees + merge/undo, question budget, real visual capture | ✅ Complete (proven end-to-end; see the P1 plan hardening log) |
-| [P2 Trust Layer](plans/P2-trust-layer.md) | Budgets, guards, sandbox, risk-scored gates, import | 🚧 In progress — P2.1 guards landed; P2.2 budget schemas + cost math landed, engine/doctor wiring red |
+| [P2 Trust Layer](plans/P2-trust-layer.md) | Budgets, guards, sandbox, risk-scored gates, injection handling, import | 🚧 In progress — P2.1 guards landed; P2.2 budgets landed (schemas, cost meter, engine enforcement, doctor checks); P2.3 sandbox hardening landed (schema, env sanitization + path containment, sandboxed invocation, doctor checks); P2.4 risk-scored gates landed (config schema, pure scoring with ceiling bands, kernel-owned action map, `risk.computed`, doctor checks); P2.5 prompt-injection handling landed (injection schema, pure detector, engine wiring, `injection.detected` events, doctor checks) — remaining: safety-floor hardening, import with baseline |
 | [P3 Learning](plans/P3-learning.md) | Eval harness, skill packages, lessons, memory | ⬜ Planned |
 | [P4 Team](plans/P4-team.md) | Multi-adapter, epics, visual baselines, named users | ⬜ Planned |
 | [P5 Enterprise](plans/P5-enterprise.md) | Control plane, RBAC, audit chain, brands, compliance | ⬜ Planned |
@@ -92,13 +92,13 @@ start), [`CHANGELOG.md`](../CHANGELOG.md), [`CONTRIBUTING.md`](../CONTRIBUTING.m
 
 | Path | What lives there |
 |------|------------------|
-| `kernel/src/factory_kernel/` | The reference kernel — 21 modules |
-| `kernel/schemas/` | 8 JSON Schemas + `CHANGELOG.md` (the schema migration log) |
+| `kernel/src/factory_kernel/` | The reference kernel — 23 modules |
+| `kernel/schemas/` | 10 JSON Schemas + `CHANGELOG.md` (the schema migration log) |
 | `kernel/presets/` | `solo` / `team` / `enterprise` policy presets |
 | `kernel/stages/` | `lite.yaml` and `standard.yaml` stage profiles |
 | `roles/` | Markdown role contracts (5 starter) |
 | `adapters/` | `echo`, the live `cli-agent` backend, and the `visual-capture` check producer |
-| `tests/` | 25 hermetic test modules (343 cases) + adapter fixtures |
+| `tests/` | 27 hermetic test modules (423 cases) + adapter fixtures |
 
 ---
 

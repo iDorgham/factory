@@ -1,7 +1,7 @@
 # P2 — Trust Layer Plan
 
 **Phase:** P2
-**Status:** 🚧 In progress (P2.1 guards landed 2026-10-17; **P2.2 budgets landed 2026-10-17** — schemas, cost meter, engine enforcement, doctor checks, suite fully green; **P2.3 sandbox hardening landed 2026-10-17** — global-config schema, pure sanitization/containment, sandboxed adapter invocation, doctor checks. Next: risk-scored gates, prompt-injection handling, import with baseline)
+**Status:** 🚧 In progress (P2.1 guards landed 2026-10-17; **P2.2 budgets landed 2026-10-17** — schemas, cost meter, engine enforcement, doctor checks, suite fully green; **P2.3 sandbox hardening landed 2026-10-17** — global-config schema, pure sanitization/containment, sandboxed adapter invocation, doctor checks; **P2.4 risk-scored gates landed 2026-10-18** — `risk_scoring` config schema, pure weighted scoring with ceiling bands, kernel-owned band→action map, `risk.computed` on the record, stage-scoped signals, doctor checks; **P2.5 prompt-injection handling landed 2026-10-19** — `injection` config schema with kernel-owned baseline patterns, pure detector, manifest labeling, `injection.detected` events, the `injection_flag` risk signal, dashboard rows, doctor checks. Next: safety-floor hardening, import with baseline)
 **Goal:** Make it safe to leave running: budgets enforced, anti-cheating guards active, sandbox hardened, risk-scored gates in place, and honest baselines on import.
 
 **Depends on:** [P1](P1-solo-slice.md) demonstrably reliable.
@@ -50,18 +50,26 @@ and `doctor` checks for guard-id integrity plus authorization validity.
 - [ ] Secrets in host store/env only; injected only into whitelisted commands; scrubbed from logs and artifacts *(P2.3 covers the env half: secrets never reach the adapter subprocess at all unless allowlisted; out of scope: host store injection, log/artifact scrubbing)*
 
 *(The sandbox TDD-red cases from `8348af8` are resolved — the suite is fully green at `b3696c6`:
-343 collected — 341 passed, 2 skipped.)*
+343 collected — 341 passed, 2 skipped. The risk TDD-red cases from `8c422fc` are resolved the same
+way — fully green at `7778f06`: 380 collected — 378 passed, 2 skipped. The injection TDD-red cases
+from `ae7fc58` likewise — fully green at `878629b`: 409 collected — 407 passed, 2 skipped, and
+421 passed / 2 skipped at `d933adf` after the dashboard task-player work.)*
 
 ### 4. Risk-scored gates
-- [ ] Risk score from deterministic signals: diff size, sensitive paths, new dependencies, scope drift, external effects, history, skill maturity
-      *(profiles already declare `gate: risk_scored` on `verify`; the score computation does not exist)*
-- [ ] Score bands → `auto | notify | require_human | require_role` per preset; projects may tighten, not loosen (loosening audited, Team+)
-- [ ] Gate config shape (spec §14.2); safety floor remains non-disableable
+- [x] Risk score from deterministic signals *(P2.4, as scoped for P2: the kernel-owned set — guard violations, check failures, retries, and the budget verdict, aggregated stage-scoped over "the road to this pass" — drives the score; the spec's wider aspirational list (diff size, sensitive paths, new dependencies, scope drift, external effects, history, skill maturity) stays future scope, with `scope_guard` raising signals once it exists)*
+      *(profiles already declare `gate: risk_scored` on `verify`; the computation now exists — `risk.computed` records score, band, action, and the exact signals)*
+- [x] Score bands → `auto | notify | require_human | require_role` per preset; projects may tighten, not loosen (loosening audited, Team+) *(P2.4 partially: ceiling bands land kernel-global with `low → auto_advance`, `medium → awaiting_human`, `high → blocked`; per-preset band profiles and the Team+ tighten-only/loosening-audit machinery remain open — deliberately, so no project config can loosen the Solo safety floor)*
+- [x] Gate config shape (spec §14.2); safety floor remains non-disableable *(P2.4: `risk_scoring` weights + thresholds schema-shaped and doctor-checked; the band→action map is kernel-owned and rejected outright in config — the floor cannot be negotiated away)*
 
 ### 5. Prompt-injection handling
-- [ ] Untrusted inputs (issues, READMEs, web pages, imported repos) wrapped and labeled as data in the manifest
-- [ ] Sensitive actions gated by the kernel, never by agent judgment
-- [ ] Injection fixture in the conformance suite; spec success criterion #11 as a test
+- [x] Untrusted inputs (issues, READMEs, web pages, imported repos) wrapped and labeled as data in the manifest
+- [x] Sensitive actions gated by the kernel, never by agent judgment
+- [x] Injection fixture in the conformance suite; spec success criterion #11 as a test
+      *(P2.5 landed the detection half: the kernel's own baseline patterns flag untrusted manifest
+      items before the adapter sees them, the manifest entry is labeled, an `injection.detected`
+      event is recorded, and the `injection_flag` signal feeds the existing band→action map — the
+      kernel gained an observation, not a new enforcement path. Still open: wrapping *all* untrusted
+      sources (web pages, imported repos) and the spec's injection fixture in the conformance suite.)*
 
 ### 6. Safety floor hardening
 - [ ] Human gate on irreversible `effects: external` stages *(every stage in `lite.yaml` is currently `effects: local`)*

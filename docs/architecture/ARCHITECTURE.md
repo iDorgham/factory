@@ -1,7 +1,7 @@
 # Design & Architecture — Enterprise AI Software Factory
 
 **Version:** 3.0
-**Status:** Matches the reference implementation at `b3696c6` — P0 and P1 complete, P2.1 guards landed, P2.2 budgets landed, P2.3 sandbox hardening landed. Claims below that describe *target* behavior are marked as such.
+**Status:** Matches the reference implementation at `d933adf` — P0 and P1 complete, P2.1 guards landed, P2.2 budgets landed, P2.3 sandbox hardening landed, P2.4 risk-scored gates landed, P2.5 prompt-injection handling landed. Claims below that describe *target* behavior are marked as such.
 **Related:** [Specification v3.0](<../specification/Enterprise AI Software Factory — Specification v3.0.md>) · [PRD](../product/PRD.md) · [Roadmap](../plans/ROADMAP.md)
 
 > Files are the protocol. Events are the truth. A small kernel enforces. Agents only propose.
@@ -181,11 +181,15 @@ that exist · agents cannot edit policy/budget/role/kernel files ✅ by construc
 closed to agents).
 
 **Threat model mitigations** — current state, honestly marked: prompt injection → untrusted wrapping +
-kernel-evaluated gates ⚠️ (wrapping is spec'd; the conformance suite carries an injected-instruction
-case, full handling is P2) · secret exfiltration → no secrets in env ⚠️ + `no_secret_in_diff` ✅ +
-egress allowlist ❌ · dependency attacks → `no_lockfile_surprise` ✅ (install scripts / risk scoring
-still spec'd) · test tampering → `no_test_deletion` ✅, `no_check_tampering` ❌ · runaway cost →
-`budgets.py` ⚠️ · skill privilege escalation → skills carry no permissions (P3, no skills yet) ·
+kernel-evaluated gates ✅ (the gate side is real as of P2.4 — kernel-evaluated, score-driven gates
+decide by computed band, never agent judgment; P2.5 adds detection: kernel-owned baseline patterns
+flag untrusted manifest items, the manifest entry is labeled, and the `injection_flag` signal feeds
+the same band→action map — the conformance injection fixture remains open) ·
+secret exfiltration → no secrets in env ⚠️ + `no_secret_in_diff` ✅ + egress allowlist ❌ ·
+dependency attacks → `no_lockfile_surprise` ✅, risk scoring ✅ as of P2.4 (install scripts /
+allowlists still spec'd) · test tampering → `no_test_deletion` ✅, `no_check_tampering` ❌ ·
+runaway cost → `budgets.py` ✅ as of P2.2 and feeding the risk score as of P2.4 · skill privilege
+escalation → skills carry no permissions (P3, no skills yet) ·
 audit tampering → event hash chain ✅, external anchors ❌ (P5).
 
 > The point of the marks is that this table can be trusted. A security document that lists planned
@@ -220,9 +224,9 @@ Files plus a single-host kernel comfortably handle hundreds of active jobs per p
 
 ---
 
-## Appendix — implemented vs. target at `b3696c6`
+## Appendix — implemented vs. target at `d933adf`
 
-The suite is **343 collected — 341 passed, 2 skipped, 0 failed** — fully green at the close of P2.3
+The suite is **423 collected — 421 passed, 2 skipped, 0 failed** — fully green at the close of P2.5
 (the 2 skips are capability-gated conformance cases).
 
 | Capability | State |
@@ -237,6 +241,7 @@ The suite is **343 collected — 341 passed, 2 skipped, 0 failed** — fully gre
 | Guards: `no_check_tampering`, `scope_guard` | ❌ not implemented (P2) |
 | Budget cost meter + schemas | ✅ implemented (24 cases): pricing, limits, engine enforcement (verdict file, breach events, hard stop), doctor checks |
 | Sandbox: env sanitization, lexical path containment, worktree-locked adapter cwd, doctor integrity | ✅ implemented (27 cases); container isolation and network/resource-limit enforcement are not yet |
-| Risk-scored gates | ❌ stages declare `gate: risk_scored`; no score exists |
+| Risk-scored gates | ✅ implemented (37 cases): `risk_scoring` config schema + defaults, pure weighted-signal scoring with ceiling bands, kernel-owned band→action map, stage-scoped "road to this pass" signals, `risk.computed` verdict on the record, doctor integrity checks; per-preset band profiles and the spec's wider aspirational signal set (diff size, sensitive paths, scope drift, …) are not yet |
+| Prompt-injection handling | ✅ implemented (30 cases): `injection` config schema, kernel-owned baseline patterns (config may only add), pure `injection.py` detector, manifest `injection_flags` labeling, `injection.detected` events, `injection_flag` risk signal, dashboard verdict rows, doctor integrity checks; the spec's wrapping of *all* untrusted sources (web pages, imported repos) and the conformance injection fixture are not yet |
 | Skill packages, evals, lessons, memory compounding | ❌ P3 |
 | RBAC, hash-chained audit + anchors, brands, compliance export | ❌ P5 |

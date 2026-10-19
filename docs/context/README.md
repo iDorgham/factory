@@ -34,5 +34,5 @@ to reason about the project.
   enforced by the `commit-msg` hook and CI, so they are **machine-verified**; see
   [AI-PROVENANCE.md](AI-PROVENANCE.md). Other unknowns are labeled as unknown — do not treat a blank as a fact.
 - **Planned vs. shipped is always marked.** Where a control is spec'd but not implemented, the docs say so.
-  If a statement conflicts with the repository, **the repository wins**. Snapshot date: **2026-10-17**
-  (commit `9948840`).
+  If a statement conflicts with the repository, **the repository wins**. Snapshot date: **2026-10-19**
+  (commit `d933adf`).
