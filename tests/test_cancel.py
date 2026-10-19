@@ -120,16 +120,31 @@ def test_run_cancellable_kills_the_whole_tree(tmp_path):
     """A grandchild process dies with its parent: the tree is killed, not
     just the process the kernel started."""
     marker = tmp_path / "grandchild.txt"
+    pidfile = tmp_path / "grandchild.pid"
+    grandchild = tmp_path / "grandchild.py"
+    grandchild.write_text(
+        "import os, sys, time\n"
+        "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+        "time.sleep(3)\n"
+        "open(sys.argv[2], 'w').write('x')\n",
+        encoding="utf-8",
+    )
     script = tmp_path / "spawner.py"
     script.write_text(
-        "import subprocess,sys,time\n"
-        "subprocess.Popen([sys.executable, '-c', "
-        f"\"import time; time.sleep(3); open({str(marker)!r}, 'w').write('x')\"])\n"
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable] + sys.argv[1:])\n"
         "time.sleep(30)\n",
         encoding="utf-8",
     )
+
+    def cancel() -> bool:
+        # Cancel only once the grandchild exists, so the tree is really there
+        # to be killed.
+        return pidfile.exists()
+
     outcome = run_cancellable(
-        f'"{sys.executable}" "{script}"', shell=True, timeout=60, cancel=lambda: True
+        [sys.executable, str(script), str(grandchild), str(pidfile), str(marker)],
+        timeout=60, cancel=cancel,
     )
     assert outcome.cancelled
     time.sleep(4.0)
@@ -144,11 +159,13 @@ def test_cancelling_a_running_job_stops_the_adapter(kernel, tmp_path):
     job_id = job["id"]
 
     marker = tmp_path / "adapter-finished.txt"
+    started = tmp_path / "adapter-started.txt"
     _fake_adapter(
         kernel.adapters_dir,
         "slow-adapter",
         "import json,sys,time\n"
         "req = json.loads(sys.stdin.read())\n"
+        f"open({str(started)!r}, 'w').write('running')\n"
         "time.sleep(20)\n"
         f"open({str(marker)!r}, 'w').write('done')\n"
         "print(json.dumps({'type':'done'}))\n",
@@ -166,7 +183,10 @@ def test_cancelling_a_running_job_stops_the_adapter(kernel, tmp_path):
     worker.start()
 
     # Wait until the adapter is actually running, then stop the job.
-    time.sleep(2.0)
+    deadline = time.monotonic() + 30
+    while not started.exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert started.exists(), "the adapter never started"
     kernel.job_cancel(job_id)
     assert done.wait(timeout=30), "the engine did not stop after the cancel"
 
