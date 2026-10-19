@@ -184,6 +184,31 @@ def test_player_handles_blocked_question(kernel, ask_cmd):
     assert player["can_stop"] is True
 
 
+def test_player_start_label_for_a_fresh_job(demo_job):
+    """A pending job has never run, so the control reads Start (the label
+    travels in the model so markup and model cannot drift)."""
+    kernel, job = demo_job
+    player = build_view(kernel)["player"]
+    assert player["can_resume"] is True
+    assert player["resume_label"] == "Start"
+
+
+def test_export_dashboard_keeps_the_player_footer_read_only(demo_job, tmp_path):
+    """The shareable snapshot is still the Solo view: the footer renders (its
+    controls fall through to send(), which refuses when not live)."""
+    kernel, job = demo_job
+    out = export_dashboard(kernel, out=tmp_path / "dashboard.html")
+    html = out.read_text(encoding="utf-8")
+    # The footer is not gated behind LIVE, and the button label comes from the
+    # view model rather than being hardcoded in the markup.
+    assert "const p = v.player;" in html
+    assert "const p = LIVE ? v.player : null;" not in html
+    assert '$("p-resume").textContent = p.resume_label;' in html
+    # The embedded view payload still carries the active job's player model.
+    view = json.loads(html.split("let VIEW = ", 1)[1].split(";\n", 1)[0])
+    assert view["player"]["brief"] == "Build a landing page"
+
+
 def test_render_html_contains_player(demo_job):
     kernel, job = demo_job
     html = render_html(build_view(kernel), live=True)

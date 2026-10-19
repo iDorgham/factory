@@ -554,6 +554,13 @@ def _player(job: dict, timeline: list[dict]) -> Optional[dict]:
         stage_phrase = _state_phrase(state)
     else:
         stage_phrase = active["phrase"] if active else _state_phrase(state)
+    # Resume is offered only where the kernel would actually run the job:
+    # `Engine.execute` accepts pending/running/awaiting_human, and of those
+    # only *pending* is a start — awaiting_human is approved (SHA-bound),
+    # and a running job is already live, so starting it again would double
+    # it up. Blocked jobs continue by answering their question; stalled and
+    # failed jobs have no retry path in this slice.
+    can_resume = state == "pending"
     return {
         "job": job["id"],
         "brief": job.get("brief", ""),
@@ -565,13 +572,10 @@ def _player(job: dict, timeline: list[dict]) -> Optional[dict]:
         "total": total,
         "pct": pct,
         "needs_you": state in NEEDS_YOU_STATES,
-        # Resume is offered only where the kernel would actually run the job:
-        # `Engine.execute` accepts pending/running/awaiting_human, and of those
-        # only *pending* is a start — awaiting_human is approved (SHA-bound),
-        # and a running job is already live, so starting it again would double
-        # it up. Blocked jobs continue by answering their question; stalled and
-        # failed jobs have no retry path in this slice.
-        "can_resume": state == "pending",
+        "can_resume": can_resume,
+        # A pending job has never run, so the control reads "Start"; the label
+        # travels in the model so the markup and the model cannot drift.
+        "resume_label": "Start" if can_resume else "Resume",
         "can_stop": state in ("pending", "running", "awaiting_human",
                               "blocked", "stalled", "paused", "failed"),
     }
@@ -993,7 +997,7 @@ function render(v) {
 
 function renderPlayer(v) {
   const el = $("player");
-  const p = LIVE ? v.player : null;
+  const p = v.player;
   PLAYER = p;
   if (!p) { el.style.display = "none"; document.body.style.paddingBottom = ""; return; }
   el.style.display = "block";
@@ -1011,7 +1015,10 @@ function renderPlayer(v) {
   $("p-stage").textContent = `${p.stage_phrase} · ${p.done}/${p.total}`;
 
   // Controls are static nodes toggled by visibility: rebuilding them per
-  // stream tick would drop an in-flight click.
+  // stream tick would drop an in-flight click. In a read-only export they
+  // still render (the footer is the ambient signal) and a click falls through
+  // to send(), which refuses with the "Read-only export" note.
+  $("p-resume").textContent = p.resume_label;
   $("p-resume").hidden = !p.can_resume;
   $("p-need").hidden = !p.needs_you;
   $("p-stop").hidden = !p.can_stop;
