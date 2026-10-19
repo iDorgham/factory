@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -210,6 +211,18 @@ def test_pixel_of_decodes_png(tmp_path):
     assert capture.pixel_of(png, x=3, y=2) == (250, 10, 5)
 
 
+def _echo_var_cmd(var: str, out: Path) -> str:
+    """A shell command that writes one environment variable to a file.
+
+    The check runner uses ``shell=True``, so the command must speak the
+    running platform's shell: ``cmd.exe`` expands ``%VAR%``, POSIX shells
+    expand ``$VAR``.
+    """
+    if os.name == "nt":
+        return f'cmd /c "echo %{var}% > \"{out}\""'
+    return f'echo "${var}" > "{out}"'
+
+
 def test_engine_exports_visual_env_to_checks(kernel):
     """The engine hands checks the attempt paths via FACTORY_* env vars."""
     kernel.project_create("v", mode="solo", domain="web")
@@ -219,7 +232,7 @@ def test_engine_exports_visual_env_to_checks(kernel):
     checks = {k: {"cmd": "echo 'placeholder'", "required": False}
               for k in keep}
     checks["visual"] = {
-        "cmd": f'cmd /c "echo %FACTORY_VISUAL_OUT% > \"{log}\""',
+        "cmd": _echo_var_cmd("FACTORY_VISUAL_OUT", log),
         "required": False,
     }
     checks_path.write_text(json.dumps(checks), encoding="utf-8")
@@ -245,7 +258,7 @@ def test_run_one_honours_extra_env(tmp_path):
     (tmp_path / "out.tmp").write_text("", encoding="utf-8")
     result = run_one(
         "envcheck",
-        {"cmd": f'echo %FACTORY_TEST_VAR% > "{tmp_path / "out.tmp"}"',
+        {"cmd": _echo_var_cmd("FACTORY_TEST_VAR", tmp_path / "out.tmp"),
          "required": True},
         tmp_path,
         timeout=30,

@@ -23,7 +23,9 @@ Runtime wiring (SandboxError-free defaults): when ``factory.json`` names no
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -186,16 +188,22 @@ class TestSanitizeEnv:
 # ----------------------------------------------------------------------
 
 class TestResolveUnder:
+    # `resolve_under` is pure lexical path math, so the base never has to
+    # exist — but it must be an absolute path in the *running platform's*
+    # syntax. A hard-coded `C:\work\job` is a relative path on POSIX, so the
+    # containment rule under test would not be the one that ships.
+    BASE = Path(tempfile.gettempdir()) / "factory-sandbox-base" / "job"
+
     def test_relative_path_resolves_inside_base(self):
         from factory_kernel.sandbox import resolve_under
 
-        base = Path(r"C:\work\job")
+        base = self.BASE
         assert resolve_under(base, "outputs/a.txt") == base / "outputs" / "a.txt"
 
     def test_absolute_path_inside_base_is_kept(self):
         from factory_kernel.sandbox import resolve_under
 
-        base = Path(r"C:\work\job")
+        base = self.BASE
         target = base / "outputs" / "a.txt"
         assert resolve_under(base, str(target)) == target
 
@@ -203,24 +211,28 @@ class TestResolveUnder:
         from factory_kernel.sandbox import resolve_under, SandboxError
 
         with pytest.raises(SandboxError):
-            resolve_under(Path(r"C:\work\job"), "../outside.txt")
+            resolve_under(self.BASE, "../outside.txt")
 
     def test_absolute_path_outside_base_is_rejected(self):
         from factory_kernel.sandbox import resolve_under, SandboxError
 
+        outside = self.BASE.parent / "outside" / "evil.txt"
         with pytest.raises(SandboxError):
-            resolve_under(Path(r"C:\work\job"), r"C:\Windows\system32\evil")
+            resolve_under(self.BASE, str(outside))
 
     def test_mixed_dotdot_escape_is_rejected(self):
         from factory_kernel.sandbox import resolve_under, SandboxError
 
+        # `outputs/../../secret` — the separators must be the platform's own,
+        # or the ".." segments are part of a filename and never escape.
+        escape = os.path.join("outputs", "..", "..", "secret")
         with pytest.raises(SandboxError):
-            resolve_under(Path(r"C:\work\job"), r"outputs\..\..\secret")
+            resolve_under(self.BASE, escape)
 
     def test_deep_but_contained_path_is_kept(self):
         from factory_kernel.sandbox import resolve_under
 
-        base = Path(r"C:\work\job")
+        base = self.BASE
         target = base / "a" / "b" / "c" / "d.txt"
         assert resolve_under(base, str(target)) == target
 
@@ -282,20 +294,20 @@ class TestAdapterSubprocess:
         return Adapter(adapter_dir)
 
     def test_explicit_env_replaces_inherited_env(self, tmp_path, monkeypatch):
-        from types import SimpleNamespace
-
         import json as _json
+
+        from factory_kernel.cancel import ProcOutcome
 
         captured = {}
 
         def fake_run(cmd, **kwargs):
             captured.update(kwargs)
-            # CompletedProcess-like: the adapter parses stdout as NDJSON.
-            return SimpleNamespace(
+            # The adapter parses stdout as NDJSON.
+            return ProcOutcome(
                 stdout=_json.dumps({"type": "done"}) + "\n",
                 stderr="", returncode=0)
 
-        monkeypatch.setattr("factory_kernel.adapters.subprocess.run", fake_run)
+        monkeypatch.setattr("factory_kernel.adapters.run_cancellable", fake_run)
         adapter = self._adapter(tmp_path)
         request = {"attempt_dir": str(tmp_path / "attempt")}
 
@@ -306,25 +318,26 @@ class TestAdapterSubprocess:
         assert captured["env"] == {"PATH": "/usr/bin"}
 
     def test_defaults_preserve_today_behavior(self, tmp_path, monkeypatch):
-        from types import SimpleNamespace
-
         import json as _json
+
+        from factory_kernel.cancel import ProcOutcome
 
         captured = {}
 
         def fake_run(cmd, **kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(
+            return ProcOutcome(
                 stdout=_json.dumps({"type": "done"}) + "\n",
                 stderr="", returncode=0)
 
-        monkeypatch.setattr("factory_kernel.adapters.subprocess.run", fake_run)
+        monkeypatch.setattr("factory_kernel.adapters.run_cancellable", fake_run)
         adapter = self._adapter(tmp_path)
 
         adapter.run({"attempt_dir": str(tmp_path / "attempt")})
 
         assert captured["cwd"] == str(adapter.dir)
-        assert "env" not in captured  # operator-side conformance inherits
+        # operator-side conformance inherits the environment
+        assert captured["env"] is None
 
 
 # ----------------------------------------------------------------------

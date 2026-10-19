@@ -1,33 +1,74 @@
 # P3 — Learning Plan
 
 **Phase:** P3
-**Status:** ⬜ Planned
-**Goal:** Compounding improvement, measured: later jobs pass more checks with fewer rounds than earlier ones on the same fixtures.
+**Status:** ⬜ Planned — nothing implemented. The Step 3 slice below is the designed scope; it does
+not start until P2.6 (safety-floor hardening) lands. P2.7 (import with baseline) is deferred by
+decision and does not block P3 — see [P2 §7](P2-trust-layer.md) for the reasoning.
+**Goal:** Make the factory learn incrementally: capture structured lessons after each job, keep
+project memory fresh (conventions + repo map), and establish a minimal eval harness so future
+changes don't silently regress behavior.
 
-**Depends on:** [P2](P2-trust-layer.md).
+**Depends on:** [P2](P2-trust-layer.md) 🚧 in progress — P2.1–P2.5 landed; P2.6 (safety floor) is the
+last blocker, P2.7 (import with baseline) is deferred and not a blocker.
 
 ## Workstreams
 
-### 1. Eval harness
-- [ ] Fixture tasks: small repo + brief + expected checks
-- [ ] Run against any combination of roles, skills, models, adapters
-- [ ] Results in `evals/results/` with pinned versions of everything involved (reproducible)
-- [ ] Used for: skill promotion gating, adapter/model comparison (cost + success rate), regression detection on role/kernel prompt changes
+### 1. Lessons ledger (structured, append-only)
+- [ ] Schema: `kernel/schemas/lessons.schema.json`
+- [ ] Writer: `kernel/lessons.py` (atomic, dedup by `job_id` + `outcome`)
+- [ ] Terminal hook writes lessons on `completed` / `failed` / `cancelled`
+- [ ] Separate stall hook: `stalled` is **recoverable** (the job can resume from
+      it), so it is not a terminal state — a lesson is written when the stall is
+      *resolved* (the job leaves `stalled` for `running`/`failed`/`cancelled`),
+      recorded as `outcome: stalled` with the resolving transition, so a
+      half-finished job is never recorded as terminal
 
-### 2. Skill packages
-- [ ] Package format: `SKILL.md`, `evals/`, `CHANGELOG.md`, `skill.json` (version, scope, owner, provenance, dependencies, status)
-- [ ] Semantic versioning; jobs **pin** versions at creation — a skill change never alters a running job
-- [ ] Lifecycle: proposed → project scope (0.x, ≥ 2 eval fixtures) → candidate → promoted (global 1.0: passing evals + measured gain over no-skill baseline + 2 independent uses; Team+ needs human approval) → deprecated/rolled back
-- [ ] Project skills override global of the same name; skills carry no permissions
-- [ ] CLI: `factory skill create|improve|promote|deprecate|pin`, `factory eval run`
+### 2. Memory: conventions + repo map hygiene
+- [ ] Schema: `kernel/schemas/repo-map.schema.json`
+- [ ] Repo map: `kernel/memory.py` with staleness detection and `files_hash`
+- [ ] Conventions proposals (non-blocking, no auto-merge)
+- [ ] Doctor memory checks
 
-### 3. Memory and learning
-- [ ] `decisions.md` (ADRs, human-approved), `conventions.md`, `repo-map.json` (commit-SHA-stamped, stale-marked, refreshed before planning), `lessons.jsonl` (post-job structured entries with job references + confidence)
-- [ ] Rules enforced: no secrets; humans can edit/delete; lessons influence behavior only through reviewed convention/skill changes, never silent injection
-- [ ] Curator role active: mines lessons, proposes skill changes, keeps repo map fresh; output validated like any other contract
+### 3. Minimal eval harness
+- [ ] Fixtures in `evals/fixtures/`, suites in `evals/suites/`
+- [ ] Runner: `kernel/eval.py` with temp trees
+- [ ] CLI: `factory eval run`
+- [ ] Results in `evals/results/` with version pins
+
+### 4. Integration & safety
+- [ ] Terminal hook in the engine; schemas registered; atomic writes; no silent injection;
+      hermetic eval
 
 ## Exit criteria
+- Lessons written on terminal states with full structured fields
+- Repo map tracks `commit_sha` / `files_hash` and detects staleness
+- `factory eval run` works with hermetic fixtures and writes versioned results
+- `factory doctor` passes with the memory checks
+- Full suite remains green
+- No auto-merge of conventions; lessons are not injected into agent context
+- **Measurable improvement** (the roadmap's P3 definition of done): on the eval
+      fixtures, later jobs pass more checks in fewer rounds than earlier ones.
+      The eval harness in §3 is the instrument that proves it — the lessons
+      ledger and memory are the mechanism, the measurement is the exit
+      criterion. Skill packages and promotion ride on the same harness and are
+      listed under §3b, not as a separate phase.
 
-- Skill promotion requires passing evals and a measured gain over baseline (spec success criterion #7).
-- A/B runs (with/without skill) are reproducible from stored versions.
-- Memory never contains secrets; every lesson traces to a job.
+### 3b. Skill packages and promotion (rides on the eval harness)
+- [ ] Skill package schema + registry (`kernel/skills/`)
+- [ ] Promotion rule: a skill is promoted only when it wins on the eval
+      fixtures — promotion is measured, never asserted
+- [ ] Skills are injected into agent context only after promotion
+
+## Commands
+```bash
+# Once P3 lands (the modules below do not exist yet):
+# python -m pytest tests/test_lessons.py tests/test_repo_map.py tests/test_eval_harness.py -v
+python -m pytest -v
+python -m flake8 kernel/src tests
+./factory doctor
+# ./factory eval run --suite minimal
+```
+
+## Deferred to follow-up (Step 3b)
+- Full skill package lifecycle and promotion with a measured gain over a no-skill baseline
+- Cross-project/global skills; curator automatic behavior changes (only proposals in this slice)

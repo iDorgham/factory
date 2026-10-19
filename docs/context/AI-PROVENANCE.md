@@ -6,7 +6,7 @@
 > tool and model are recorded per commit in `AI-Tool`/`AI-Model` trailers and enforced by a `commit-msg`
 > hook and by CI, so that part **is** machine-verified. §1 separates the two.
 
-Snapshot date: **2026-10-17** (commit `9948840`).
+Snapshot date: **2026-10-19** (branch `feat/dashboard-task-player`).
 
 ---
 
@@ -15,11 +15,11 @@ Snapshot date: **2026-10-17** (commit `9948840`).
 | Fact | Source |
 |------|--------|
 | All commits are authored by `iDorgham` (`yasser.dorgham@gmail.com`) | `git log` |
-| 19 commits total: 8 dated 2026-10-16, 11 dated 2026-10-17 | `git log --date` |
+| 42 commits total at the snapshot: 8 dated 2026-10-16, 20 on 2026-10-17, 8 on 2026-10-18, 6 on 2026-10-19 | `git log --date` |
 | No commit trailers, no tool footers, no `Co-authored-by` in the **P0/P1** history (commits before `f5815b9`) | `git log --format=%B` + repo-wide search |
 | No model/tool strings in any source, config, or doc (besides the spec's illustrative `claude-code` adapter) | repo-wide search |
 | Every commit from `f5815b9` onward carries `AI-Tool` + `AI-Model` trailers, and `factory provenance verify` passes on the tree | `git log`, `factory provenance verify` |
-| The `docs/` tree, root `CHANGELOG/CONTRIBUTING/SECURITY`, and this context pack were written by **OpenCode** using model **Big Pickle** (provider `opencode`) | This documentation session |
+| The `docs/` tree, root `CHANGELOG/CONTRIBUTING/SECURITY`, and this context pack were written by **OpenCode** with **Big Pickle** (provider `opencode`) in the 2026-10-17 session; the later reconciliation passes (P2.4, P2.5, the task player, this branch) were written with **Kilo Code** and **Qoder**, each recorded in the commits' own trailers | `git log` trailers per commit |
 
 ## 2. Attested provenance (owner statement)
 
@@ -42,11 +42,15 @@ So every phase of code in the repository (P0 and all of P1) was produced with th
 | **P1 Solo slice** (3 — conformance) | `a3fde93` | Adapter conformance suite (§20.3), `factory adapter test`, `slow` fixture | OpenCode | Big Pickle | Owner-attested |
 | **P1 Solo slice** (4 — dashboard) | `5dfdf19` | Solo dashboard (`serve` SSE + `export-dashboard`), `request-changes` rework loop | OpenCode | Big Pickle | Owner-attested |
 | **P1 Solo slice** (5 — worktrees/merge/undo) | `9398dfe` | Factory-managed git worktrees, checkpoint commits, merge queue (conflict → blocked), Undo (revert/reset) | OpenCode | Big Pickle | Owner-attested |
-| **Documentation** | (uncommitted) | `docs/` tree, root CHANGELOG/CONTRIBUTING/SECURITY, context pack, provenance tool + CI | OpenCode | Big Pickle | Self-observed |
+| **Documentation** (first pass) | `634ff41` | `docs/` tree, root CHANGELOG/CONTRIBUTING/SECURITY, context pack, provenance tool + CI | OpenCode | Big Pickle (provider `opencode`) | Self-observed |
 | **P2 Trust layer** (1 — guards) | `f5815b9`, `741bf84`, `12f231f`, `42b8ae6`, `8f2e8de`, `9010e60` | Guards over the diff: authorizations schema, `gitrepo.collect_diff`, three deterministic guards (`no_test_deletion`, `no_lockfile_surprise`, `no_secret_in_diff`), engine hook (attempt-base diff, events, fingerprint feed, stall on repeat), plain-language dashboard verdicts, doctor integrity checks | OpenCode | GLM-5.3-Flash Free (provider `opencode`) | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
 | **P2.2 Budgets and metering** | `9558498`, `9948840`, `08980ed`, `1895f14` | `budget`/`price_table` schemas + TDD-red contracts, pure cost meter (`calculate_cost`, `stage_limits`, `check_budget`), engine enforcement (verdict file, soft/hard breach events, hard stop, cached-refusal idempotency, dashboard verdict rows), doctor budget-integrity checks | OpenCode | GLM-5.3-Flash Free (provider `opencode`) | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
 | **P2.3 Sandbox hardening** | `8348af8`, `408c538`, `b3696c6` | `factory.schema.json` (first global-config schema) + hardened `factory.json` + TDD-red contracts, pure `sandbox.py` (`sanitize_env`, `resolve_under`, fail-hard policy parsing), sandboxed engine wiring (sanitized env, kernel-reserved `FACTORY_*` attribution, `strict_cwd` worktree lock, lexical path containment), doctor sandbox-integrity checks | OpenCode | GLM-5.3-Flash Free (provider `opencode`) | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
-| **P2 Trust layer** (remaining) | — | Prompt-injection handling, risk-scored gates, import with baseline verification | not started | not started | — |
+| **P2.4 Risk-scored gates** | `8c422fc`, `0f76850`, `7778f06` | `risk_scoring` config schema (kind `risk`, inlined whole-config) + shipped default block + `risk.computed` event + TDD-red contracts, pure `risk.py` (weighted-signal scoring clamped at the cap, strict-ceiling bands, kernel-owned band→action map, fail-hard config loader), engine wiring (stage-scoped "road to this pass" signals, verdict on the record before the decision, band action resolves the gate), doctor risk-integrity checks | OpenCode | GLM-5.3-Flash Free (provider `opencode`) | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
+| **P2.5 Prompt-injection handling** | `344c81f`, `ae7fc58`, `851987f`, `ed55c31`, `878629b` | `injection` config schema (kind `injection`, inlined in `factory.schema.json`) + TDD-red contracts, pure `injection.py` (kernel-owned baseline patterns, config may only add; `InjectionError` on a broken detector), engine wiring (untrusted items scanned before the adapter runs, manifest `injection_flags` labeling, `injection.detected` events, `injection_flagged` signal (weighted by `injection_flag`)), dashboard verdict rows, doctor injection-integrity checks | Kilo Code | kilo-auto/free | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
+| **P1.1 Solo dashboard task player** | `a8697f1` (Qoder), `c45d8a7`, `7b94aeb`, `d933adf` (OpenCode) | Sticky task-player footer bound to the active job (status glyph, brief, stage progress, Resume/Needs-you/Stop), honest action states (only the actions the kernel will actually run), the player rendered in the read-only export, and real ARIA semantics (labelled region, `role=progressbar` with value + valuetext, polite live status) | Qoder for `a8697f1`; OpenCode for the three follow-ups | Qoder for `a8697f1`; Big Pickle (provider `opencode`) for the three follow-ups | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
+| **P1.1 review round** | `77f32e9` | Real cancellation of work in flight (process-tree termination, cancellable adapter and check runs, the engine unwinding without writing after a cancel) and the player's honest states (unfinished-work tracking, the play glyph for a pending job, the pause named for a paused job, a footer that stacks on narrow screens) | Kilo Code | MiniMax-M3.1-Flash (provider `kilo`) | **Machine-verified** (`AI-Tool`/`AI-Model` trailers carried per commit, enforced by the commit-msg hook) |
+| **P2 Trust layer** (remaining) | — | Safety-floor hardening, import with baseline verification | not started | not started | — |
 | **P3 Learning** | — | Eval harness, skills, lessons, memory | not started | not started | — |
 | **P4 Team** | — | Multi-adapter, epics, visual baselines, named users | not started | not started | — |
 | **P5 Enterprise** | — | Control plane, RBAC, audit chain, brands, compliance | not started | not started | — |
@@ -56,9 +60,12 @@ convention). **P2 is the first phase with machine-verified provenance:** every c
 carries `AI-Tool`/`AI-Model` trailers that the repo's commit-msg hook refuses to merge without and that
 CI checks on every push (`docs/development/CONTRIBUTING.md` §3.1), so the tool/model claim is checked by
 git itself, not by memory. `factory provenance verify` makes the same check available to anyone who
-clones the repository. Every code commit since `f5815b9` — the P2.1 guards, the P2.2 budgets, and the
-P2.3 sandbox — carries the same trailers under the same hook: the machine-verified story established
-with P2.1 is the steady state.
+clones the repository. Every code commit since `f5815b9` — the P2.1 guards, the P2.2 budgets, the
+P2.3 sandbox, the P2.4 risk gates, and the P2.5 injection handling — carries the same trailers under
+the same hook: the machine-verified story established with P2.1 is the steady state. The tool and the
+model differ from slice to slice (OpenCode + GLM-5.3-Flash Free for P2.1–P2.4, Kilo Code for P2.5,
+Qoder then OpenCode for the task player), and that is the point of the convention: the difference is
+**recorded in the history**, not remembered.
 
 ---
 

@@ -52,6 +52,9 @@ STATE_PHRASES = {
 
 NEEDS_YOU_STATES = ("awaiting_human", "blocked", "stalled")
 
+# A job in one of these states has nothing left to play: the footer hides it.
+TERMINAL_STATES = ("completed", "cancelled", "superseded", "archived")
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -507,6 +510,7 @@ def build_view(kernel, project: Optional[str] = None) -> dict:
         "estimate": _estimate(kernel),
         "active_job": None,
         "timeline": [],
+        "player": None,
         "needs_you": None,
         "preview": None,
         "undo": {"available": False,
@@ -519,10 +523,85 @@ def build_view(kernel, project: Optional[str] = None) -> dict:
         detail = kernel.job_status(active["id"])
         view["active_job"] = _job_summary(detail)
         view["timeline"] = _timeline(kernel, detail)
+        view["player"] = _player_view(kernel, jobs)
         view["needs_you"] = _needs_you(kernel, detail)
         view["preview"] = _preview(kernel, detail)
         view["undo"] = _undo_state(detail)
     return view
+
+
+def _player_view(kernel, jobs: list[dict]) -> Optional[dict]:
+    """The player model for the job the sticky footer should play.
+
+    The footer tracks *unfinished* work. `_pick_active` ranks a finished job
+    in the same bucket as a pending one (both are "everything else", newest
+    first), so a job that just completed could win — and a terminal job has
+    no player, so the footer would vanish while work was still queued.
+    """
+    job = _pick_player(jobs)
+    if job is None:
+        return None
+    detail = kernel.job_status(job["id"])
+    return _player(_job_summary(detail), _timeline(kernel, detail))
+
+
+def _pick_player(jobs: list[dict]) -> Optional[dict]:
+    """The most urgent job that is still unfinished (the footer's job)."""
+    return _pick_active([j for j in jobs if j.get("state") not in TERMINAL_STATES])
+
+
+def _player(job: dict, timeline: list[dict]) -> Optional[dict]:
+    """Sticky-footer player model for the active job (Spotify-style).
+
+    Progress counts only real stages — guard/budget/injection verdict rows
+    carry a ":" in their id and never move the bar.
+
+    The controls and the status line mirror what the *kernel* permits, not what
+    would look reassuring: Resume appears only when `Engine.execute` would run
+    the job, and a job that is waiting on the human (or has stopped) names the
+    reason instead of the stage that happened to be in flight.
+    """
+    if not job:
+        return None
+    if job.get("state") in TERMINAL_STATES:
+        return None
+    stages = [s for s in timeline if ":" not in s["id"]]
+    total = len(stages)
+    done = sum(1 for s in stages if s["status"] == "done")
+    active = next((s for s in stages if s["status"] == "active"), None)
+    if active is not None:
+        done = min(done, total - 1)
+    pct = round(done * 100 / total) if total else 0
+    state = job.get("state", "")
+    if state in NEEDS_YOU_STATES or state in ("failed", "paused"):
+        stage_phrase = _state_phrase(state)
+    else:
+        stage_phrase = active["phrase"] if active else _state_phrase(state)
+    # Resume is offered only where the kernel would actually run the job:
+    # `Engine.execute` accepts pending/running/awaiting_human, and of those
+    # only *pending* is a start — awaiting_human is approved (SHA-bound),
+    # and a running job is already live, so starting it again would double
+    # it up. Blocked jobs continue by answering their question; stalled and
+    # failed jobs have no retry path in this slice.
+    can_resume = state == "pending"
+    return {
+        "job": job["id"],
+        "brief": job.get("brief", ""),
+        "project": job.get("project"),
+        "state": state,
+        "state_phrase": _state_phrase(state),
+        "stage_phrase": stage_phrase,
+        "done": done,
+        "total": total,
+        "pct": pct,
+        "needs_you": state in NEEDS_YOU_STATES,
+        "can_resume": can_resume,
+        # A pending job has never run, so the control reads "Start"; the label
+        # travels in the model so the markup and the model cannot drift.
+        "resume_label": "Start" if can_resume else "Resume",
+        "can_stop": state in ("pending", "running", "awaiting_human",
+                              "blocked", "stalled", "paused", "failed"),
+    }
 
 
 def _undo_state(job: dict) -> dict:
@@ -722,6 +801,41 @@ _TEMPLATE = r"""<!DOCTYPE html>
   td, th { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
   .err { color:var(--warn); font-size:13px; min-height:18px; }
   code { background:#12151b; padding:1px 6px; border-radius:6px; font-size:12px; }
+  .player { position:fixed; left:0; right:0; bottom:0; background:#161920;
+            border-top:1px solid var(--line); padding:10px 16px; z-index:50; }
+  .player-bar { max-width:1100px; margin:0 auto; display:flex; align-items:center;
+                gap:18px; }
+  .p-track { display:flex; align-items:center; gap:10px; width:280px; min-width:0; }
+  .p-glyph { width:34px; height:34px; border-radius:8px; background:var(--accent);
+             display:flex; align-items:center; justify-content:center;
+             color:#0b0d12; font-size:16px; flex:none; }
+  .p-glyph.needs { background:var(--warn); }
+  .p-glyph.stalled { background:#d64545; }
+  .p-meta { min-width:0; }
+  .p-brief { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden;
+             text-overflow:ellipsis; }
+  .p-progress { flex:1; min-width:120px; }
+  .p-bar { height:6px; border-radius:999px; background:var(--line); overflow:hidden; }
+  .p-fill { height:100%; background:var(--accent); width:0%; transition:width .4s; }
+  .p-stage { font-size:12px; color:var(--muted); margin-top:4px; }
+  .p-controls { display:flex; gap:8px; flex:none; }
+  .p-controls button { padding:7px 12px; font-size:13px; }
+  /* The footer is fixed to the bottom, so the page has to reserve room for
+     it — and the reservation has to follow the footer's own height, which
+     changes when the layout stacks on a narrow screen. */
+  body.has-player { padding-bottom: 96px; }
+  @media (max-width: 640px) {
+    .player { padding:8px 12px; }
+    .player-bar { flex-wrap:wrap; gap:10px; }
+    .p-track { width:auto; flex:1 1 100%; }
+    .p-progress { flex:1 1 100%; min-width:0; }
+    .p-controls { flex:1 1 100%; justify-content:flex-end; }
+    body.has-player { padding-bottom: 150px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .p-glyph.spin { animation:pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.55; } }
+  }
 </style>
 </head>
 <body>
@@ -784,9 +898,34 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="err" id="err"></div>
 </div>
 
+<footer class="player" id="player" role="region" aria-label="Active task" style="display:none">
+  <div class="player-bar">
+    <div class="p-track">
+      <div class="p-glyph" id="p-glyph" aria-hidden="true">▶</div>
+      <div class="p-meta">
+        <div class="p-brief" id="p-brief"></div>
+        <span class="pill" id="p-project"></span>
+      </div>
+    </div>
+    <div class="p-progress">
+      <div class="p-bar" id="p-bar" role="progressbar" aria-label="Task progress"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="p-fill" id="p-fill" aria-hidden="true"></div>
+      </div>
+      <div class="p-stage" id="p-stage" role="status" aria-live="polite"></div>
+    </div>
+    <div class="p-controls">
+      <button id="p-resume">Resume</button>
+      <button id="p-need" class="secondary">Needs you</button>
+      <button id="p-stop" class="secondary">Stop</button>
+    </div>
+  </div>
+</footer>
+
 <script>
 const LIVE = __LIVE__;
 let VIEW = __VIEW__;
+let PLAYER = null;
 const $ = (id) => document.getElementById(id);
 const api = (path) => path;
 const esc = (s) => (s == null ? "" : String(s)).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
@@ -890,6 +1029,44 @@ function render(v) {
     `<tr><td>${esc(j.brief).slice(0,48)}</td><td>${esc(j.project)}</td>` +
     `<td>${esc(j.state_phrase)}</td><td class="muted">${esc((j.updated_at||"").slice(0,19))}</td></tr>`
   ).join("");
+
+  renderPlayer(v);
+}
+
+function renderPlayer(v) {
+  const el = $("player");
+  const p = v.player;
+  PLAYER = p;
+  if (!p) { el.style.display = "none"; document.body.classList.remove("has-player"); return; }
+  el.style.display = "block";
+  document.body.classList.add("has-player");
+
+  const glyph = $("p-glyph");
+  // A pending job is a job that has not started yet ("Start"), so it plays
+  // the play glyph — only a job that is actually mid-flight spins.
+  const playing = p.state === "pending" || p.state === "running";
+  glyph.textContent = p.needs_you ? "!" : (playing ? "▶" : "⏸");
+  glyph.className = "p-glyph" + (p.needs_you ? " needs" : "")
+    + (p.state === "running" ? " spin" : "")
+    + (p.state === "stalled" || p.state === "failed" ? " stalled" : "");
+  $("p-brief").textContent = p.brief;
+  $("p-brief").title = p.state_phrase;
+  $("p-project").textContent = p.project || "";
+  $("p-fill").style.width = p.pct + "%";
+  // The bar is decorative; the progressbar role carries the value so a screen
+  // reader hears "3 of 5 stages" rather than an unlabelled coloured strip.
+  $("p-bar").setAttribute("aria-valuenow", String(p.pct));
+  $("p-bar").setAttribute("aria-valuetext", `${p.done} of ${p.total} stages`);
+  $("p-stage").textContent = `${p.stage_phrase} · ${p.done}/${p.total}`;
+
+  // Controls are static nodes toggled by visibility: rebuilding them per
+  // stream tick would drop an in-flight click. In a read-only export they
+  // still render (the footer is the ambient signal) and a click falls through
+  // to send(), which refuses with the "Read-only export" note.
+  $("p-resume").textContent = p.resume_label;
+  $("p-resume").hidden = !p.can_resume;
+  $("p-need").hidden = !p.needs_you;
+  $("p-stop").hidden = !p.can_stop;
 }
 
 async function send(payload, then) {
@@ -935,6 +1112,9 @@ $("sample").onclick = () => send({command: "create_sample"});
 $("undo").onclick = () => {
   if (VIEW.undo && VIEW.undo.available) send({command: "undo", job_id: VIEW.undo.job});
 };
+$("p-resume").onclick = () => PLAYER && send({command: "execute", job_id: PLAYER.job});
+$("p-stop").onclick = () => PLAYER && send({command: "cancel", job_id: PLAYER.job});
+$("p-need").onclick = () => $("needs-card").scrollIntoView({behavior:"smooth", block:"center"});
 
 async function refresh() {
   try {

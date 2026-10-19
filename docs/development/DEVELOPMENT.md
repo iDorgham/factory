@@ -44,11 +44,11 @@ factory/
 ├── CHANGELOG.md CONTRIBUTING.md SECURITY.md
 ├── docs/                        # the documentation set (index: docs/README.md)
 ├── kernel/
-│   ├── schemas/                 # 8 JSON Schemas for every file type + their change log
+│   ├── schemas/                 # 10 JSON Schemas for every file type + their change log
 │   ├── presets/                 # solo.json / team.json / enterprise.json
 │   ├── stages/                  # lite.yaml, standard.yaml
-│   └── src/factory_kernel/      # the Python reference kernel (21 modules)
-├── tests/                       # hermetic pytest suite (24 modules)
+│   └── src/factory_kernel/      # the Python reference kernel (23 modules)
+├── tests/                       # hermetic pytest suite (27 modules)
 │   └── fixtures/adapters/       # slow, fake-browser, cli-echo-agent, cli-ask-agent, budget-burner
 ├── roles/                       # markdown role contracts (5 starter)
 ├── adapters/                    # echo, cli-agent (adapters) + visual-capture (a check producer)

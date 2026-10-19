@@ -1,15 +1,17 @@
 # Project History
 
 Complete development history of the Enterprise AI Software Factory, reconstructed from `git log` and the
-repository contents. Snapshot date: **2026-10-17**.
+repository contents. Snapshot date: **2026-10-19**.
 
-- **Repository:** local git repo (no upstream remote), branch `master`, HEAD `9948840`, 19 commits.
+- **Repository:** GitHub repo `github.com/iDorgham/factory` (public), branches `master` and
+  `feat/dashboard-task-player` (PR #1), HEAD `8a390c0`, 42 commits.
 - **Author of all commits:** `iDorgham` (`yasser.dorgham@gmail.com`).
-- **Dates:** 8 commits on 2026-10-16 (the P0 + P1 build day), 11 on 2026-10-17 (P1 hardening, P2.1, P2.2).
+- **Dates:** 8 commits on 2026-10-16 (the P0 + P1 build day), 20 on 2026-10-17 (P1 hardening, P2.1,
+  P2.2), 8 on 2026-10-18 (P2.3, P2.4), 6 on 2026-10-19 (P2.5, the task player, the docs set).
 - **Tooling:** the owner attests that **P0 and P1 were developed with OpenCode using the Big Pickle model**
   (not machine-verified; those commits predate the provenance convention). From P2.1 onward the tool and
   model are recorded per commit in `AI-Tool` / `AI-Model` trailers and enforced by hook + CI
-  (see [AI-PROVENANCE.md](AI-PROVENANCE.md)).
+  (see [AI-PROVENANCE.md](../AI-PROVENANCE.md)).
 
 > Note on a discrepancy: the `README.md` and docs that existed before the documentation reorganization
 > described the project as "P0 complete, P1 planned." The git history shows P1 work had already landed.
@@ -331,6 +333,197 @@ Read-only and order-stable.
 `factory doctor` reports ok on the real tree with no sandbox warnings; the manual env-probe run
 confirmed the three sandbox facts end-to-end (secrets invisible, `FACTORY_*` attribution visible,
 adapter cwd = the job worktree).
+
+---
+
+## P2.4 — Risk-scored gates (2026-10-18)
+
+### `8c422fc` — the config contract and TDD contracts (red)
+
+The `verify` stage declared `gate: risk_scored`, yet the engine evaluated every gate against a
+hardcoded `risk = 0.0` (and kept a second hardcoded threshold table for `standard.yaml`'s
+`if_risk_above:*` gates). This slice committed the contract the score must satisfy:
+
+- `kernel/schemas/risk.schema.json` (kind `risk`; shape inlined in `factory.schema.json` — the
+  project's ninth schema): `weights` for the five signals (guard_violation, budget_soft_exceeded,
+  budget_hard_exceeded, check_failure, retry_attempt — non-negative integers, unknown keys rejected)
+  and `thresholds`. The shipped `factory.json` gained the explicit block (40/20/50/15/10,
+  thresholds 25/50/100) — configuration visible, not implicit.
+- `risk.computed` added to the event-type enum: data carries stage, score, band, action, and the
+  exact signals dict, so the gate's decision cites stored evidence, not recollection. Emission
+  scope recorded up front: only gates that consume risk pay the event.
+- `tests/test_risk.py` (32 cases): schema/contract cases green at landing; 21 pure-function cases
+  and 2 engine-wiring cases deliberately red — the specification for the next slices. Suite at this
+  commit: **375 collected — 350 passed, 2 skipped, 23 failed**, the failures exactly the named reds.
+
+**Contract deviations recorded during P2.4** (the pinned tests are the spec; the task sketch
+yielded — declared, not silently bent):
+
+1. **Kernel-owned `gate_actions`.** The band→action map (`low → auto_advance`,
+   `medium → awaiting_human`, `high → blocked`) is NOT operator-configurable. A config that could
+   set `high: "auto_advance"` would let tuning negotiate the safety floor away — the same reason
+   guards and budgets are kernel code. The schema rejects `gate_actions`, and the doctor names
+   any attempt as the kernel-ownership violation it is.
+2. **Thresholds are ceilings, not floors.** `score < low → low`, `< medium → medium`, else high;
+   `thresholds["high"]` doubles as the clamp cap. Floor semantics ("score ≥ 100 is high") would
+   make the top band nearly unreachable with sane weights. The loader adds what JSON Schema
+   cannot express: cross-key monotonic ordering and strict-integer values (a float `2.0` weight
+   is invalid here).
+3. **`compute_score` takes the full config dict** (cap derives from `thresholds`), and the signal
+   vocabulary is the pinned 4-key kernel shape (`guard_violations`, `budget_status`,
+   `check_failures`, `attempt_number`) rather than the sketch's weight-key booleans — the verb
+   keys would collide with weight names and lose the status-vs-count distinction.
+4. **`assess` returns a plain verdict dict.** The pinned contracts compare dict equality; the
+   sketch's `RiskVerdict` dataclass would have needed equals-gymnastics for zero kernel benefit —
+   the kernel's existing style passes plain dicts (budget verdicts, check results).
+
+### `0f76850` — pure `risk.py` and the gate wiring
+
+`risk.py` is pure — no subprocess, no file I/O: `compute_score` (weighted sum clamped at the cap;
+unknown, missing, negative, or non-integer input raises `RiskError` rather than becoming a guessed
+score), `resolve_band` (strict ceilings), `gate_action` (kernel-owned map), `assess` (one verdict
+dict whose score/band/action all cite the same checked numbers), `load_risk_config` (`None` →
+documented defaults; present-but-empty or malformed → `RiskError`; defensive copy).
+
+Wiring (`engine._apply_gate` / `_risk_gate` / `_stage_signals`), and the slice's key design
+decision — **stage-scoped signals**: the gate only ever evaluates a *passed* attempt, so failures
+of the winning attempt are impossible by definition; what is real is the road that got here. Guard
+violations and check failures are summed across the stage's recorded rounds (they made the stage
+retry), the winning attempt number carries the retries, and the winning attempt's `budget.json`
+carries the possible soft breach. Without this, `retry_attempt` and `check_failure` weights could
+never score non-zero. The verdict lands in `risk.computed` verbatim before `gate.evaluated`;
+`auto_advance` → decision `auto`, `awaiting_human` → decision `require_human` (job parked at
+awaiting_human at the risk gate), `blocked` → decision `blocked` (deterministic job failure citing
+score/band — the counterpiece of the P2.2 hard stop). A `RiskError` at gate time fails the job
+deterministically, the same policy as unpriced usage: a broken risk config must never degrade into
+a silently loosened gate. `if_risk_above:L` now compares the computed band's severity to the level
+(the old hardcoded table is gone). Noise promise kept: `gate: none`/`required` stages never emit.
+
+One declared Step 2 test fix (no semantics change): the config-flip engine test's signature dropped
+the `kernel`/`demo_job` fixtures it created and never used (a fresh `Kernel` over the edited
+factory.json was already the point).
+
+Manual verification on the real engine path with the default shipped config: a crafted
+*recovering* check (fails attempt 1, passes attempt 2 of verify) scores a genuine
+`1×15 + 1×10 = 25 → medium → require_human`, parking the job at the risk gate; a clean sibling
+tree runs `0 → low → auto` through the same gate, with the approve stage still demanding its human.
+
+### `7778f06` — doctor risk-integrity checks
+
+Doctor verifies the risk system's invariants at boot (the section re-read from disk, matching the
+convention): `risk_scoring` schema-validity is authoritative (`ok=False` — the kernel cannot
+compute scores from a corrupt config); `gate_actions` is authoritative too, naming the
+kernel-ownership violation explicitly instead of burying it in a generic additional-properties
+message; zero (or negative) weights and non-monotonic thresholds are advisories — runtime refuses
+the latter, doctor surfaces it earlier so no job has to die of it first. Read-only, order-stable
+(weight warnings sorted by signal name).
+
+Declared while verifying: the zero-weights expectation originally listed the two signals in the
+wrong order (alphabetically `check_failure` sorts before `guard_violation`).
+
+**Closing suite at `7778f06`:** **380 collected — 378 passed, 2 skipped** — fully green; flake8
+clean; `factory doctor` reports ok on the real tree with no risk warnings. Risk-scored gates are
+the last enforcement slice of the trust layer's kernel-computed signals: guards say what changed,
+budgets say what it cost, sandbox says what the agent could see, and risk now says how worried the
+kernel is about the road to acceptance.
+
+---
+
+## P2.5 — Prompt-injection handling (2026-10-19)
+
+### `344c81f` — the schema contract (green)
+
+`kernel/schemas/injection.schema.json` (the project's tenth schema, kind `injection`; the shape
+inlined as an optional section in `factory.schema.json`): configurable detection `patterns`
+(`id`, `pattern`, optional non-negative integer `weight`), `additionalProperties: false` at every
+level. The shipped `factory.json` keeps **no** `injection` section — absence is the documented
+baseline configuration, not an unconfigured guess. The same commit registered the
+`injection.detected` event type and added the `injection_flag` risk weight (shipped default 100, so
+a single flag alone clears the high band).
+
+### `ae7fc58` — TDD-red contracts (red)
+
+`tests/test_injection.py` (30 cases): the schema cases green at landing; the detector, engine, and
+doctor cases deliberately red — the written contract for the next commits.
+
+### `851987f` — pure `injection.py`
+
+The detector is pure: no subprocess, no file I/O, no LLM. `load_injection_config` (absent → the
+documented kernel baseline patterns; present-but-empty, malformed, an invalid regex, a negative or
+non-integer weight, or a config id colliding with a kernel-owned baseline id → `InjectionError`;
+defensive copies), `scan_item` (regex match, excerpt truncated at 80 chars, confidence 1.0),
+`scan_manifest_items`, and `injection_signal` (1 when any item was flagged).
+
+**Design decisions recorded during the slice** (declared, not silently bent):
+
+1. **The response is kernel-owned; only detection is configurable.** The kernel ships four baseline
+   patterns (`ignore-previous-instructions`, `system-prompt-leak`, `do-not-follow`,
+   `pretend-to-be`). A config may **add** patterns; reusing a baseline id is rejected outright,
+   because a tunable detection set that could *remove* the baseline would let configuration
+   negotiate the safety floor away — the same reasoning that keeps the risk band→action map out of
+   config.
+2. **No new enforcement path.** A detection becomes the `injection_flagged` signal (weighted by `injection_flag`) and the
+   **existing** band→action map decides (low → auto-advance, medium → park for a human, high →
+   blocked). The kernel gained no new way to stop a job; it gained a new *observation*.
+3. **Detection runs on manifest untrusted items, before the adapter sees them** — not on adapter
+   output, which is the guards' job. The manifest entry is labeled with `injection_flags` so the
+   agent *sees* that the kernel flagged something, and the same pass emits the events. Labeling
+   without the signal, or the signal without the label, would each be half a control.
+
+### `ed55c31` — engine wiring
+
+Untrusted items under the job's `issues/` are discovered and scanned before the adapter runs; flags
+are attached to the manifest entries, one `injection.detected` event is emitted per match (stage,
+attempt, item path, pattern id, ≤80-char excerpt, confidence 1.0), and the job-wide
+`injection_flagged` signal feeds the P2.4 weighted score. An `InjectionError` becomes the
+deterministic `config_error` status and writes an `injection.json` verdict file — a broken
+detector can never degrade into "nothing flagged".
+
+### `878629b` — doctor injection-integrity checks
+
+Section schema validity is authoritative; a config pattern id colliding with a kernel-owned baseline
+is an authoritative error naming the ownership violation; zero-weight patterns are advisories
+(sorted by pattern id). Read-only, order-stable, re-reading `factory.json` from disk.
+
+## P1.1 — Solo dashboard task player (2026-10-19)
+
+Commits on `feat/dashboard-task-player` (PR #1), all in the Solo dashboard:
+
+- `a8697f1` — a sticky task-player footer bound to the active job (status glyph, brief, stage
+  progress, and Resume / Needs-you / Stop controls that stay reachable from any scroll position).
+  The controls are static nodes toggled by visibility rather than rebuilt per stream tick — an
+  early version recreated them on every frame and swallowed an in-flight click, which the live
+  check caught.
+- `c45d8a7` — the footer offered Resume for blocked/stalled/failed/paused jobs, but
+  `Engine.execute` accepts only pending/running/awaiting_human, so every such click failed with
+  "Job is 'blocked'; cannot execute". The footer now offers only the actions the kernel will
+  actually run, and the ambient status line names the reason (the state phrase) instead of the
+  active-stage phrase — the footer no longer contradicts the card above it.
+- `7b94aeb` — the read-only export hid the sticky footer because the render path gated it on LIVE,
+  so a colleague opening the snapshot lost the ambient "what is the factory doing" signal. The
+  export now renders the footer too; in read-only mode the controls still render and a click lands
+  on the export's "Read-only export" note, the same contract as the top-level Undo button.
+- `d933adf` — the footer was invisible to assistive tech: a decorative arrow glyph, a progress strip
+  with no role, and a stage line that changed silently. It is now a labelled region containing a
+  real `role=progressbar` (value from the streamed model, as both `aria-valuenow` and a "3 of 5
+  stages" `valuetext`) and a polite live status, so a "needs you" transition is announced instead
+  of merely drawn.
+- `77f32e9` — the review round, and the one that found a real defect: **Stop did not stop the
+  work.** `job_cancel` changed the saved state while the adapter process kept running, so the
+  agent went on editing files and spending money after the operator was told the job had stopped.
+  - `kernel/src/factory_kernel/cancel.py` — process-tree termination (a POSIX process group, a
+    Windows `taskkill /T`) and a cancellable run loop with a deadline and a cancel predicate.
+  - `adapters.py` / `checks.py` — the adapter and the check runner run under that loop; a
+    cancelled run reports the new `cancelled` error class instead of a verdict.
+  - `engine.py` — the engine polls the job's own state and the lease fence, so a cancel kills the
+    work in flight, skips the checks, and writes nothing after the operator's own state change.
+  - `dashboard.py` — the footer tracks *unfinished* work (a freshly finished job no longer hides a
+    pending one), a pending job plays the play glyph instead of the pause glyph, a paused job
+    names the pause instead of the stage it was in, and the footer stacks on narrow screens so the
+    Stop control stays reachable.
+
+**Closing suite at `77f32e9`:** **437 collected — 435 passed, 2 skipped** — fully green; flake8
+clean.
 
 ---
 
