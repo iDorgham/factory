@@ -212,9 +212,13 @@ def _rmtree_writable(path) -> None:
     """Remove a tree that may contain read-only files (Windows git objects)."""
     import os
     import stat
+    import sys
 
-    def onexc(func, p, _exc):
+    def force(func, p, _exc):
         os.chmod(p, stat.S_IWRITE)
         func(p)
 
-    shutil.rmtree(path, onexc=onexc)
+    # `onexc` is Python 3.12+; 3.11 spells the same hook `onerror`. The
+    # project supports 3.11, so pick the one the running interpreter knows.
+    hook = {"onexc": force} if sys.version_info >= (3, 12) else {"onerror": force}
+    shutil.rmtree(path, **hook)
